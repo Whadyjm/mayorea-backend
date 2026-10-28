@@ -1,0 +1,66 @@
+package domain
+
+import "time"
+
+type Unit string
+
+const (
+	UnitBulk Unit = "bulto"
+	UnitBox  Unit = "caja"
+	UnitEach Unit = "unidad"
+)
+
+func (u Unit) Valid() bool { return u == UnitBulk || u == UnitBox || u == UnitEach }
+
+type Product struct {
+	ID        int64
+	Name      string
+	Unit      Unit
+	PriceUSD  Cents
+	Committed int // reserved by orders not yet dispatched
+	MinStock  int
+	Physical  int // sum of lot quantities; filled by repositories (read model)
+}
+
+// Available is the stock that can still be promised to new orders.
+func (p Product) Available() int { return p.Physical - p.Committed }
+
+type Lot struct {
+	ID        int64
+	ProductID int64
+	Code      string
+	ExpiresOn time.Time
+	Quantity  int
+	Location  string // aisle-rack
+}
+
+type Customer struct {
+	ID             int64
+	Name           string
+	RIF            string
+	Route          string
+	Phone          string
+	CreditLimitUSD Cents
+	CreditDays     int
+}
+
+type Truck struct {
+	ID     int64
+	Name   string
+	Driver string
+	Routes []string
+}
+
+func (t Truck) Serves(route string) bool {
+	for _, r := range t.Routes {
+		if r == route {
+			return true
+		}
+	}
+	return false
+}
+
+type ExchangeRate struct {
+	Rate      Rate
+	UpdatedOn time.Time
+}
