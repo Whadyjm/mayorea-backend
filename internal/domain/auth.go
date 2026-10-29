@@ -10,7 +10,7 @@ import (
 type Role string
 
 const (
-	RoleOwner       Role = "dueno"       // sees and does everything
+	RoleOwner       Role = "admin"       // sees and does everything
 	RoleCredit      Role = "credito"     // credit approval and collections
 	RoleWarehouse   Role = "galpon"      // stock, picking and dispatch
 	RoleSalesperson Role = "preventista" // takes orders
@@ -25,6 +25,7 @@ const (
 	PermCatalogRead      Permission = "catalog.read"
 	PermCatalogWrite     Permission = "catalog.write" // products, lots, trucks
 	PermCustomersWrite   Permission = "customers.write"
+	PermCustomersEdit    Permission = "customers.edit" // change a customer's data; a commerce only its own contact data
 	PermRateWrite        Permission = "rate.write"
 	PermOrdersRead       Permission = "orders.read"
 	PermOrdersCreate     Permission = "orders.create"
@@ -37,19 +38,20 @@ const (
 	PermTripsOperate     Permission = "trips.operate" // the driver's actions on a trip
 	PermTripsSettle      Permission = "trips.settle"  // office approves the driver's count
 	PermUsersManage      Permission = "users.manage"
+	PermCompanyWrite     Permission = "company.write" // edit the own profile: the distributor's (admin) or a commerce's
 )
 
 var allPermissions = []Permission{
-	PermCatalogBrowse, PermCatalogRead, PermCatalogWrite, PermCustomersWrite, PermRateWrite,
+	PermCatalogBrowse, PermCatalogRead, PermCatalogWrite, PermCustomersWrite, PermCustomersEdit, PermRateWrite,
 	PermOrdersRead, PermOrdersCreate, PermOrdersApprove, PermDispatchManage,
 	PermCollectionsRead, PermCollectionsWrite, PermTripsDepart, PermTripsRead, PermTripsOperate,
-	PermTripsSettle, PermUsersManage,
+	PermTripsSettle, PermUsersManage, PermCompanyWrite,
 }
 
 var rolePermissions = map[Role][]Permission{
 	RoleOwner: allPermissions,
 	RoleCredit: {
-		PermCatalogBrowse, PermCatalogRead, PermCustomersWrite, PermRateWrite, PermOrdersRead, PermOrdersApprove,
+		PermCatalogBrowse, PermCatalogRead, PermCustomersWrite, PermCustomersEdit, PermRateWrite, PermOrdersRead, PermOrdersApprove,
 		PermCollectionsRead, PermCollectionsWrite, PermTripsRead, PermTripsSettle,
 	},
 	RoleWarehouse: {
@@ -64,7 +66,7 @@ var rolePermissions = map[Role][]Permission{
 	// A commerce works only on its own account: the handlers scope orders, invoices
 	// and the customer list to Principal.CustomerID.
 	RoleShop: {
-		PermCatalogBrowse, PermOrdersRead, PermOrdersCreate, PermCollectionsRead,
+		PermCatalogBrowse, PermCustomersEdit, PermOrdersRead, PermOrdersCreate, PermCollectionsRead, PermCompanyWrite,
 	},
 }
 

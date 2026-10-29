@@ -39,7 +39,7 @@ func newApp(t *testing.T) *app {
 	catalog := usecase.NewCatalogService(st.Products(), st.Lots(), st.Customers(), st.Trucks(), st.Rates(), clk)
 	trips := usecase.NewTripService(st, st.Trips(), st.Trucks(), st.Orders(), st.Customers(), st.Products(), st.Invoices(),
 		st.Lots(), st.Rates(), dispatch, orders, collections, clk)
-	svc := httpapi.Services{Catalog: catalog, Orders: orders, Dispatch: dispatch, Collections: collections, Trips: trips, Auth: authSvc}
+	svc := httpapi.Services{Catalog: catalog, Orders: orders, Dispatch: dispatch, Collections: collections, Trips: trips, Auth: authSvc, Company: usecase.NewCompanyService(st.Company(), st.Customers())}
 	return &app{t: t, srv: httpapi.NewRouter(svc, httpapi.Options{}), auth: authSvc, catalog: catalog, trips: trips}
 }
 
@@ -296,4 +296,121 @@ func (a *app) shop(email string, customerID int64) string {
 		a.t.Fatal(err)
 	}
 	return a.login(email, "clave-segura-1")
+}
+
+func TestCompanyProfile(t *testing.T) {
+	a := newApp(t)
+	owner := a.user(domain.RoleOwner, "dueno@g.com", 0)
+	credit := a.user(domain.RoleCredit, "credito@g.com", 0)
+	profile := map[string]any{
+		"tradeName": " Distribuidora Sol ", "legalName": "Distribuidora Sol, C.A.", "rif": "j123456789",
+		"phone": "0241-5550100", "email": "admin@sol.com", "address": "Zona Industrial", "city": "Valencia", "state": "Carabobo", "logo": "",
+	}
+
+	// A fresh install has a blank profile, readable by anyone signed in.
+	rec := a.do("GET", "/api/v1/company", credit, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("get: %d %s", rec.Code, rec.Body)
+	}
+	var blank map[string]string
+	_ = json.Unmarshal(rec.Body.Bytes(), &blank)
+	if blank["tradeName"] != "" {
+		t.Fatalf("expected a blank profile, got %v", blank)
+	}
+	a.expect(http.StatusUnauthorized, "GET", "/api/v1/company", "", nil)
+
+	// Only owners write it; the data is validated and cleaned.
+	a.expect(http.StatusForbidden, "PUT", "/api/v1/company", credit, profile)
+	a.expect(http.StatusBadRequest, "PUT", "/api/v1/company", owner, map[string]any{"tradeName": "X", "legalName": "X", "rif": "malo"})
+	a.expect(http.StatusBadRequest, "PUT", "/api/v1/company", owner, map[string]any{"tradeName": "X", "legalName": "X", "rif": "J-12345678-9", "logo": "javascript:alert(1)"})
+	if rec := a.do("PUT", "/api/v1/company", owner, profile); rec.Code != http.StatusOK {
+		t.Fatalf("put: %d %s", rec.Code, rec.Body)
+	}
+
+	rec = a.do("GET", "/api/v1/company", credit, nil)
+	var saved map[string]string
+	_ = json.Unmarshal(rec.Body.Bytes(), &saved)
+	if saved["tradeName"] != "Distribuidora Sol" || saved["rif"] != "J-12345678-9" {
+		t.Fatalf("saved = %v", saved)
+	}
+}
+
+func TestCommerceEditsOnlyItsOwnContactData(t *testing.T) {
+	a := newApp(t)
+	ctx := context.Background()
+	mine, _ := a.catalog.CreateCustomer(ctx, usecase.NewCustomer{Name: "Abasto Sol", RIF: "J-12345678-9", Route: "Norte", Phone: "1", CreditLimitUSD: 100_000, CreditDays: 7})
+	other, _ := a.catalog.CreateCustomer(ctx, usecase.NewCustomer{Name: "Bodega Luna", RIF: "J-98765432-1", Route: "Sur", CreditLimitUSD: 50_000, CreditDays: 7})
+	shop := a.shop("sol@g.com", mine.ID)
+	credit := a.user(domain.RoleCredit, "credito@g.com", 0)
+
+	// It may change its name, RIF and phone, but not its route or credit terms, even if it sends them.
+	body := map[string]any{"name": "Abasto El Sol", "rif": "J-12345678-9", "phone": "0241-1", "route": "Sur", "creditLimitUsd": 999_999, "creditDays": 90}
+	rec := a.do("PUT", "/api/v1/customers/"+itoa(mine.ID), shop, body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("put: %d %s", rec.Code, rec.Body)
+	}
+	var got struct {
+		Name           string
+		Phone          string
+		Route          string
+		CreditLimitUsd int64
+		CreditDays     int
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	if got.Name != "Abasto El Sol" || got.Phone != "0241-1" || got.Route != "Norte" || got.CreditLimitUsd != 100_000 || got.CreditDays != 7 {
+		t.Fatalf("got %+v", got)
+	}
+	a.expect(http.StatusNotFound, "PUT", "/api/v1/customers/"+itoa(other.ID), shop, body)
+	a.expect(http.StatusBadRequest, "PUT", "/api/v1/customers/"+itoa(mine.ID), shop, map[string]any{"name": "", "rif": "J-12345678-9"})
+
+	// The office can change everything.
+	a.expect(http.StatusOK, "PUT", "/api/v1/customers/"+itoa(other.ID), credit, map[string]any{"name": "Bodega Luna", "rif": "J-98765432-1", "route": "Este", "creditLimitUsd": 70_000, "creditDays": 15})
+}
+
+func TestCommerceKeepsItsOwnCompanyProfile(t *testing.T) {
+	a := newApp(t)
+	ctx := context.Background()
+	mine, _ := a.catalog.CreateCustomer(ctx, usecase.NewCustomer{Name: "Abasto Sol", RIF: "J-12345678-9", Route: "Norte", Phone: "1", CreditLimitUSD: 100_000, CreditDays: 7})
+	other, _ := a.catalog.CreateCustomer(ctx, usecase.NewCustomer{Name: "Bodega Luna", RIF: "J-98765432-1", Route: "Sur"})
+	shopA := a.shop("sol@g.com", mine.ID)
+	shopB := a.shop("luna@g.com", other.ID)
+	owner := a.user(domain.RoleOwner, "admin@g.com", 0)
+
+	get := func(token string) map[string]string {
+		var m map[string]string
+		_ = json.Unmarshal(a.do("GET", "/api/v1/company", token, nil).Body.Bytes(), &m)
+		return m
+	}
+
+	// Before filling anything in, a commerce sees what the office registered for it.
+	if g := get(shopA); g["tradeName"] != "Abasto Sol" || g["rif"] != "J-12345678-9" {
+		t.Fatalf("default = %v", g)
+	}
+
+	profile := map[string]any{"tradeName": "Abasto El Sol", "legalName": "Abasto El Sol, C.A.", "rif": "J-12345678-9", "phone": "0241-9", "email": "sol@abasto.com", "address": "Calle 1", "city": "Valencia", "state": "Carabobo", "logo": ""}
+	a.expect(http.StatusOK, "PUT", "/api/v1/company", shopA, profile)
+
+	// It lands in its own row: the commerce reads it back, the other commerce and the distributor do not see it.
+	if g := get(shopA); g["tradeName"] != "Abasto El Sol" || g["address"] != "Calle 1" {
+		t.Fatalf("shop A = %v", g)
+	}
+	if g := get(shopB); g["tradeName"] != "Bodega Luna" {
+		t.Fatalf("shop B = %v", g)
+	}
+	if g := get(owner); g["tradeName"] != "" {
+		t.Fatalf("distributor = %v", g)
+	}
+
+	// The customer record the office works with follows.
+	var cs []struct{ Name, Phone string }
+	_ = json.Unmarshal(a.do("GET", "/api/v1/customers", shopA, nil).Body.Bytes(), &cs)
+	if len(cs) != 1 || cs[0].Name != "Abasto El Sol" || cs[0].Phone != "0241-9" {
+		t.Fatalf("customer = %+v", cs)
+	}
+
+	// And the distributor can still keep its own.
+	a.expect(http.StatusOK, "PUT", "/api/v1/company", owner, profile)
+	if g := get(shopB); g["tradeName"] != "Bodega Luna" {
+		t.Fatalf("shop B after the distributor saved = %v", g)
+	}
 }

@@ -46,13 +46,13 @@ Login con correo y contraseña (bcrypt) → token opaco que se manda como `Autho
 
 | Rol | Puede |
 |---|---|
-| `dueno` | todo, incluida la gestión de usuarios |
+| `admin` | todo, incluida la gestión de usuarios |
 | `credito` | aprobar pedidos, cobrar, tasa BCV, clientes, aprobar liquidaciones |
 | `galpon` | productos, lotes, camiones, picking, despacho y salida de camiones |
 | `preventista` | ver catálogo y tomar pedidos (quedan a su nombre) |
 | `chofer` | sacar y operar **su** camión: salida, entregar, vender, tomar pedidos, cobrar y cerrar ruta |
 
-Los permisos viven en `internal/domain/auth.go`; cada ruta declara el suyo en `httpapi/router.go`. El primer dueño se crea con `BOOTSTRAP_OWNER_EMAIL` / `BOOTSTRAP_OWNER_PASSWORD` mientras no haya usuarios. No se puede dejar el sistema sin un dueño activo.
+Los permisos viven en `internal/domain/auth.go`; cada ruta declara el suyo en `httpapi/router.go`. El primer administrador se crea con `BOOTSTRAP_OWNER_EMAIL` / `BOOTSTRAP_OWNER_PASSWORD` mientras no haya usuarios. No se puede dejar el sistema sin un dueño activo.
 
 ## API (`/api/v1`)
 
@@ -62,11 +62,12 @@ Todo requiere sesión salvo `GET /health` y `POST /auth/login`.
 |---|---|---|
 | POST | `/auth/login` `{email,password}` · `/auth/logout` · `/auth/password` `{current,new}` | sesión |
 | GET | `/auth/me` | usuario, rol y permisos (para ocultar pantallas en el frontend) |
-| GET/POST/PATCH | `/users` · `/users/{id}` · POST `/users/{id}/password` | solo `dueno` |
+| GET/POST/PATCH | `/users` · `/users/{id}` · POST `/users/{id}/password` | solo `admin` |
 
 | Método | Ruta | |
 |---|---|---|
 | GET/PUT | `/exchange-rate` | tasa BCV `{rate}` en diezmilésimas |
+| GET/PUT | `/company` | ficha de la empresa (nombre, RIF, contacto, logo): la lee cualquier usuario con sesión, solo el `admin` la edita |
 | GET/POST | `/products` · `/products/{id}/lots` | catálogo y recepción de lotes |
 | GET | `/lots` | todos los lotes con existencia (la vista del galpón, en una sola llamada) |
 | GET/POST | `/customers` · GET `/customers/{id}/credit` | clientes y estado de crédito |

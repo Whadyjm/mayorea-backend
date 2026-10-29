@@ -36,6 +36,7 @@ type storage struct {
 	users     usecase.UserRepository
 	sessions  usecase.SessionRepository
 	rates     usecase.RateRepository
+	company   usecase.CompanyRepository
 }
 
 func main() {
@@ -71,11 +72,11 @@ func run() error {
 		if err := db.Migrate(ctx, migrations.FS); err != nil {
 			return err
 		}
-		st = storage{db, db.Products(), db.Lots(), db.Customers(), db.Orders(), db.Invoices(), db.Trucks(), db.Trips(), db.Users(), db.Sessions(), db.Rates()}
+		st = storage{db, db.Products(), db.Lots(), db.Customers(), db.Orders(), db.Invoices(), db.Trucks(), db.Trips(), db.Users(), db.Sessions(), db.Rates(), db.Company()}
 		health = db
 	default:
 		m := memory.NewStore()
-		st = storage{m, m.Products(), m.Lots(), m.Customers(), m.Orders(), m.Invoices(), m.Trucks(), m.Trips(), m.Users(), m.Sessions(), m.Rates()}
+		st = storage{m, m.Products(), m.Lots(), m.Customers(), m.Orders(), m.Invoices(), m.Trucks(), m.Trips(), m.Users(), m.Sessions(), m.Rates(), m.Company()}
 		slog.Warn("using in-memory storage: data is lost on restart")
 	}
 
@@ -107,6 +108,7 @@ func run() error {
 	collections := usecase.NewCollectionService(st, st.invoices, st.rates, clk)
 	svc := httpapi.Services{
 		Auth:        authSvc,
+		Company:     usecase.NewCompanyService(st.company, st.customers),
 		Catalog:     usecase.NewCatalogService(st.products, st.lots, st.customers, st.trucks, st.rates, clk),
 		Orders:      orders,
 		Dispatch:    dispatch,

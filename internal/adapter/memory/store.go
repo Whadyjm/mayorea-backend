@@ -27,6 +27,7 @@ type Store struct {
 	users     map[int64]domain.User
 	sessions  map[string]domain.Session
 	rate      *domain.ExchangeRate
+	company   map[int64]domain.Company // key 0 = the distributor, else the customer id
 
 	seq map[string]int64
 }
@@ -36,7 +37,7 @@ func NewStore() *Store {
 		products: map[int64]domain.Product{}, lots: map[int64]domain.Lot{},
 		customers: map[int64]domain.Customer{}, orders: map[int64]domain.Order{},
 		invoices: map[int64]domain.Invoice{}, trucks: map[int64]domain.Truck{}, trips: map[int64]domain.Trip{},
-		users: map[int64]domain.User{}, sessions: map[string]domain.Session{},
+		users: map[int64]domain.User{}, sessions: map[string]domain.Session{}, company: map[int64]domain.Company{},
 		seq: map[string]int64{},
 	}
 }
@@ -90,3 +91,4 @@ func (s *Store) Invoices() usecase.InvoiceRepository   { return invoiceRepo{s} }
 func (s *Store) Trucks() usecase.TruckRepository       { return truckRepo{s} }
 func (s *Store) Trips() usecase.TripRepository         { return tripRepo{s} }
 func (s *Store) Rates() usecase.RateRepository         { return rateRepo{s} }
+func (s *Store) Company() usecase.CompanyRepository    { return companyRepo{s} }

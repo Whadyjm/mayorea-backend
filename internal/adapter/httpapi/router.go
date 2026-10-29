@@ -57,6 +57,10 @@ func NewRouter(svc Services, opt Options) http.Handler {
 	route("PATCH /users/{id}", domain.PermUsersManage, h.updateUser)
 	route("POST /users/{id}/password", domain.PermUsersManage, h.resetPassword)
 
+	// Company profile: anyone signed in may read it, only owners change it.
+	route("GET /company", "", h.getCompany)
+	route("PUT /company", domain.PermCompanyWrite, h.saveCompany)
+
 	// Catalog.
 	route("GET /exchange-rate", domain.PermCatalogBrowse, h.getRate)
 	route("PUT /exchange-rate", domain.PermRateWrite, h.setRate)
@@ -67,6 +71,7 @@ func NewRouter(svc Services, opt Options) http.Handler {
 	route("POST /products/{id}/lots", domain.PermCatalogWrite, h.receiveLot)
 	route("GET /customers", domain.PermCatalogBrowse, h.listCustomers)
 	route("POST /customers", domain.PermCustomersWrite, h.createCustomer)
+	route("PUT /customers/{id}", domain.PermCustomersEdit, h.updateCustomer)
 	route("GET /customers/{id}/credit", domain.PermOrdersRead, h.customerCredit)
 	route("GET /trucks", domain.PermCatalogRead, h.listTrucks)
 	route("POST /trucks", domain.PermCatalogWrite, h.createTruck)

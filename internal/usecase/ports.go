@@ -72,6 +72,7 @@ type LotRepository interface {
 
 type CustomerRepository interface {
 	Create(ctx context.Context, c *domain.Customer) error
+	Update(ctx context.Context, c *domain.Customer) error
 	List(ctx context.Context) ([]domain.Customer, error)
 	Get(ctx context.Context, id int64) (domain.Customer, error)
 	FindByIDs(ctx context.Context, ids []int64) (map[int64]domain.Customer, error)

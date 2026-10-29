@@ -17,6 +17,7 @@ type Services struct {
 	Collections *usecase.CollectionService
 	Trips       *usecase.TripService
 	Auth        *usecase.AuthService
+	Company     *usecase.CompanyService
 }
 
 type handlers struct{ Services }
@@ -486,4 +487,88 @@ func (h handlers) registerPayment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, toPayment(p))
+}
+
+// ---------- company profile ----------
+
+type companyDTO struct {
+	TradeName string `json:"tradeName"`
+	LegalName string `json:"legalName"`
+	RIF       string `json:"rif"`
+	Phone     string `json:"phone"`
+	Email     string `json:"email"`
+	Address   string `json:"address"`
+	City      string `json:"city"`
+	State     string `json:"state"`
+	Logo      string `json:"logo"`
+}
+
+func toCompany(c domain.Company) companyDTO {
+	return companyDTO{c.TradeName, c.LegalName, c.RIF, c.Phone, c.Email, c.Address, c.City, c.State, c.Logo}
+}
+
+func (h handlers) getCompany(w http.ResponseWriter, r *http.Request) {
+	own, _ := shopScope(r) // a commerce reads its own profile; everyone else the distributor's
+	c, err := h.Company.Get(r.Context(), own)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toCompany(c))
+}
+
+func (h handlers) saveCompany(w http.ResponseWriter, r *http.Request) {
+	var in companyDTO
+	if err := decode(r, &in); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	own, _ := shopScope(r)
+	c, err := h.Company.Save(r.Context(), own, domain.Company{
+		TradeName: in.TradeName, LegalName: in.LegalName, RIF: in.RIF, Phone: in.Phone, Email: in.Email,
+		Address: in.Address, City: in.City, State: in.State, Logo: in.Logo,
+	})
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toCompany(c))
+}
+
+// updateCustomer: the office edits everything; a commerce only its own name, RIF and phone.
+func (h handlers) updateCustomer(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	var in struct {
+		Name           string       `json:"name"`
+		RIF            string       `json:"rif"`
+		Route          string       `json:"route"`
+		Phone          string       `json:"phone"`
+		CreditLimitUSD domain.Cents `json:"creditLimitUsd"`
+		CreditDays     int          `json:"creditDays"`
+	}
+	if err := decode(r, &in); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	var c domain.Customer
+	if own, scoped := shopScope(r); scoped {
+		if id != own {
+			writeError(w, r, domain.NotFound("Cliente no encontrado."))
+			return
+		}
+		c, err = h.Catalog.UpdateCustomerContact(r.Context(), id, usecase.CustomerContact{Name: in.Name, RIF: in.RIF, Phone: in.Phone})
+	} else {
+		c, err = h.Catalog.UpdateCustomer(r.Context(), id, usecase.NewCustomer{
+			Name: in.Name, RIF: in.RIF, Route: in.Route, Phone: in.Phone, CreditLimitUSD: in.CreditLimitUSD, CreditDays: in.CreditDays,
+		})
+	}
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toCustomer(c))
 }

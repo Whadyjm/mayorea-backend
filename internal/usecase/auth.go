@@ -208,7 +208,7 @@ func (s *AuthService) CreateUser(ctx context.Context, in NewUser) (domain.User, 
 		return domain.User{}, domain.Invalid("Ese correo no parece válido.")
 	}
 	if !s.permits(in.Email, in.Role) {
-		return domain.User{}, domain.Rule("Solo los correos de la lista de acceso pueden ser dueños.")
+		return domain.User{}, domain.Rule("Solo los correos de la lista de acceso pueden ser administradores.")
 	}
 	if err := domain.ValidateUserFields(in.Name, in.Role, in.TruckID, in.CustomerID); err != nil {
 		return domain.User{}, err
@@ -281,7 +281,7 @@ func (s *AuthService) UpdateUser(ctx context.Context, id int64, in EditUser) (do
 		return domain.User{}, err
 	}
 	if !s.permits(u.Email, in.Role) {
-		return domain.User{}, domain.Rule("Solo los correos de la lista de acceso pueden ser dueños.")
+		return domain.User{}, domain.Rule("Solo los correos de la lista de acceso pueden ser administradores.")
 	}
 	if u.Role == domain.RoleOwner && u.Active && (in.Role != domain.RoleOwner || !in.Active) {
 		all, err := s.users.List(ctx)
@@ -295,7 +295,7 @@ func (s *AuthService) UpdateUser(ctx context.Context, id int64, in EditUser) (do
 			}
 		}
 		if others == 0 {
-			return domain.User{}, domain.Rule("Debe quedar al menos un dueño activo.")
+			return domain.User{}, domain.Rule("Debe quedar al menos un administrador activo.")
 		}
 	}
 	if in.TruckID != 0 {

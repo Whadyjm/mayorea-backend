@@ -406,3 +406,31 @@ func (r rateRepo) Set(ctx context.Context, er domain.ExchangeRate) error {
 	r.s.rate = &er
 	return nil
 }
+
+type companyRepo struct{ s *Store }
+
+func (r companyRepo) Get(ctx context.Context, customerID int64) (domain.Company, bool, error) {
+	defer r.s.lock(ctx)()
+	c, ok := r.s.company[customerID]
+	return c, ok, nil
+}
+
+func (r companyRepo) Save(ctx context.Context, customerID int64, c domain.Company) error {
+	defer r.s.lock(ctx)()
+	r.s.company[customerID] = c
+	return nil
+}
+
+func (r customerRepo) Update(ctx context.Context, c *domain.Customer) error {
+	defer r.s.lock(ctx)()
+	if _, ok := r.s.customers[c.ID]; !ok {
+		return domain.NotFound("Cliente no encontrado.")
+	}
+	for id, o := range r.s.customers {
+		if id != c.ID && o.RIF == c.RIF {
+			return domain.Conflict("Ya existe un cliente con el RIF %s.", c.RIF)
+		}
+	}
+	r.s.customers[c.ID] = *c
+	return nil
+}

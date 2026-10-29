@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 
 	"github.com/jackc/pgx/v5"
 
@@ -264,4 +265,53 @@ func (r rateRepo) Current(ctx context.Context) (domain.ExchangeRate, error) {
 func (r rateRepo) Set(ctx context.Context, er domain.ExchangeRate) error {
 	_, err := r.d.q(ctx).Exec(ctx, `insert into exchange_rates (rate, effective_on) values ($1, $2)`, er.Rate, er.UpdatedOn)
 	return err
+}
+
+// ---------- company profiles ----------
+
+// One row for the distributor (customer_id null) and one per commerce.
+type companyRepo struct{ d *DB }
+
+func (r companyRepo) Get(ctx context.Context, customerID int64) (domain.Company, bool, error) {
+	var c domain.Company
+	err := r.d.q(ctx).QueryRow(ctx,
+		`select trade_name, legal_name, rif, phone, email, address, city, state, logo from company where customer_id is not distinct from $1::bigint`,
+		truckArg(customerID)).
+		Scan(&c.TradeName, &c.LegalName, &c.RIF, &c.Phone, &c.Email, &c.Address, &c.City, &c.State, &c.Logo)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.Company{}, false, nil
+	}
+	return c, err == nil, err
+}
+
+func (r companyRepo) Save(ctx context.Context, customerID int64, c domain.Company) error {
+	tag, err := r.d.q(ctx).Exec(ctx,
+		`update company set trade_name = $1, legal_name = $2, rif = $3, phone = $4, email = $5,
+		   address = $6, city = $7, state = $8, logo = $9, updated_at = now()
+		 where customer_id is not distinct from $10::bigint`,
+		c.TradeName, c.LegalName, c.RIF, c.Phone, c.Email, c.Address, c.City, c.State, c.Logo, truckArg(customerID))
+	if err != nil || tag.RowsAffected() > 0 {
+		return err
+	}
+	_, err = r.d.q(ctx).Exec(ctx,
+		`insert into company (trade_name, legal_name, rif, phone, email, address, city, state, logo, customer_id)
+		 values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+		c.TradeName, c.LegalName, c.RIF, c.Phone, c.Email, c.Address, c.City, c.State, c.Logo, truckArg(customerID))
+	return err
+}
+
+func (r customerRepo) Update(ctx context.Context, c *domain.Customer) error {
+	tag, err := r.d.q(ctx).Exec(ctx,
+		`update customers set name = $2, rif = $3, route = $4, phone = $5, credit_limit_usd = $6, credit_days = $7 where id = $1`,
+		c.ID, c.Name, c.RIF, c.Route, c.Phone, c.CreditLimitUSD, c.CreditDays)
+	if isUniqueViolation(err) {
+		return domain.Conflict("Ya existe un cliente con el RIF %s.", c.RIF)
+	}
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.NotFound("Cliente no encontrado.")
+	}
+	return nil
 }

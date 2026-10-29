@@ -172,3 +172,52 @@ func (s *CatalogService) SetRate(ctx context.Context, rate domain.Rate) (domain.
 	}
 	return r, nil
 }
+
+// CustomerContact is what a commerce may change about itself.
+type CustomerContact struct {
+	Name  string
+	RIF   string
+	Phone string
+}
+
+func validateCustomerContact(in CustomerContact) error {
+	switch {
+	case strings.TrimSpace(in.Name) == "":
+		return domain.Invalid("Escribe el nombre del comercio.")
+	case !domain.ValidRIF(in.RIF):
+		return domain.Invalid("El RIF debe verse así: J-12345678-9.")
+	}
+	return nil
+}
+
+// UpdateCustomerContact changes name, RIF and phone only; route and credit terms stay as the office set them.
+func (s *CatalogService) UpdateCustomerContact(ctx context.Context, id int64, in CustomerContact) (domain.Customer, error) {
+	if err := validateCustomerContact(in); err != nil {
+		return domain.Customer{}, err
+	}
+	c, err := s.customers.Get(ctx, id)
+	if err != nil {
+		return domain.Customer{}, err
+	}
+	c.Name, c.RIF, c.Phone = strings.TrimSpace(in.Name), domain.NormalizeRIF(in.RIF), strings.TrimSpace(in.Phone)
+	if err := s.customers.Update(ctx, &c); err != nil {
+		return domain.Customer{}, err
+	}
+	return c, nil
+}
+
+// UpdateCustomer is the office's full edit, including route and credit terms.
+func (s *CatalogService) UpdateCustomer(ctx context.Context, id int64, in NewCustomer) (domain.Customer, error) {
+	if in.CreditLimitUSD < 0 || in.CreditDays < 0 {
+		return domain.Customer{}, domain.Invalid("El límite y los días de crédito no pueden ser negativos.")
+	}
+	c, err := s.UpdateCustomerContact(ctx, id, CustomerContact{Name: in.Name, RIF: in.RIF, Phone: in.Phone})
+	if err != nil {
+		return domain.Customer{}, err
+	}
+	c.Route, c.CreditLimitUSD, c.CreditDays = strings.TrimSpace(in.Route), in.CreditLimitUSD, in.CreditDays
+	if err := s.customers.Update(ctx, &c); err != nil {
+		return domain.Customer{}, err
+	}
+	return c, nil
+}
