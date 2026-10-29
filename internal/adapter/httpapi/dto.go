@@ -57,10 +57,13 @@ type customerDTO struct {
 	Phone          string       `json:"phone"`
 	CreditLimitUSD domain.Cents `json:"creditLimitUsd"`
 	CreditDays     int          `json:"creditDays"`
+	Address        string       `json:"address"`
+	Lat            *float64     `json:"lat"`
+	Lng            *float64     `json:"lng"`
 }
 
 func toCustomer(c domain.Customer) customerDTO {
-	return customerDTO{c.ID, c.Name, c.RIF, c.Route, c.Phone, c.CreditLimitUSD, c.CreditDays}
+	return customerDTO{c.ID, c.Name, c.RIF, c.Route, c.Phone, c.CreditLimitUSD, c.CreditDays, c.Address, c.Lat, c.Lng}
 }
 
 type creditDTO struct {

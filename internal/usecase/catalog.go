@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"time"
 
@@ -111,6 +112,20 @@ type NewCustomer struct {
 	Phone          string
 	CreditLimitUSD domain.Cents
 	CreditDays     int
+	Address        string
+	Lat, Lng       *float64
+	OwnerID        int64 // set when a commerce adds one of its own clients
+}
+
+// validateGeo: a location is a latitude and a longitude together, on Earth.
+func validateGeo(lat, lng *float64) error {
+	if (lat == nil) != (lng == nil) {
+		return domain.Invalid("La latitud y la longitud van juntas.")
+	}
+	if lat != nil && (*lat < -90 || *lat > 90 || *lng < -180 || *lng > 180) {
+		return domain.Invalid("La ubicación no es válida.")
+	}
+	return nil
 }
 
 func (s *CatalogService) CreateCustomer(ctx context.Context, in NewCustomer) (domain.Customer, error) {
@@ -122,9 +137,13 @@ func (s *CatalogService) CreateCustomer(ctx context.Context, in NewCustomer) (do
 	case in.CreditLimitUSD < 0 || in.CreditDays < 0:
 		return domain.Customer{}, domain.Invalid("El límite y los días de crédito no pueden ser negativos.")
 	}
+	if err := validateGeo(in.Lat, in.Lng); err != nil {
+		return domain.Customer{}, err
+	}
 	c := domain.Customer{
 		Name: strings.TrimSpace(in.Name), RIF: domain.NormalizeRIF(in.RIF), Route: strings.TrimSpace(in.Route),
 		Phone: strings.TrimSpace(in.Phone), CreditLimitUSD: in.CreditLimitUSD, CreditDays: in.CreditDays,
+		Address: strings.TrimSpace(in.Address), Lat: in.Lat, Lng: in.Lng, OwnerID: in.OwnerID,
 	}
 	if err := s.customers.Create(ctx, &c); err != nil {
 		return domain.Customer{}, err
@@ -132,8 +151,40 @@ func (s *CatalogService) CreateCustomer(ctx context.Context, in NewCustomer) (do
 	return c, nil
 }
 
+// ListCustomers are the distributor's customers; the clients a commerce keeps for itself are not part of them.
 func (s *CatalogService) ListCustomers(ctx context.Context) ([]domain.Customer, error) {
-	return s.customers.List(ctx)
+	cs, err := s.customers.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(cs, func(c domain.Customer) bool { return c.OwnerID != 0 }), nil
+}
+
+// ListClients are the clients that belong to one commerce.
+func (s *CatalogService) ListClients(ctx context.Context, ownerID int64) ([]domain.Customer, error) {
+	cs, err := s.customers.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(cs, func(c domain.Customer) bool { return c.OwnerID != ownerID }), nil
+}
+
+// CreateClient adds a client to a commerce's own list.
+func (s *CatalogService) CreateClient(ctx context.Context, ownerID int64, in NewCustomer) (domain.Customer, error) {
+	in.OwnerID = ownerID
+	return s.CreateCustomer(ctx, in)
+}
+
+// UpdateClient edits one of a commerce's own clients; another commerce's is "not found".
+func (s *CatalogService) UpdateClient(ctx context.Context, ownerID, id int64, in NewCustomer) (domain.Customer, error) {
+	c, err := s.customers.Get(ctx, id)
+	if err != nil {
+		return domain.Customer{}, err
+	}
+	if c.OwnerID != ownerID {
+		return domain.Customer{}, domain.NotFound("Cliente no encontrado.")
+	}
+	return s.UpdateCustomer(ctx, id, in)
 }
 
 type NewTruck struct {
@@ -216,11 +267,15 @@ func (s *CatalogService) UpdateCustomer(ctx context.Context, id int64, in NewCus
 	if in.CreditLimitUSD < 0 || in.CreditDays < 0 {
 		return domain.Customer{}, domain.Invalid("El límite y los días de crédito no pueden ser negativos.")
 	}
+	if err := validateGeo(in.Lat, in.Lng); err != nil {
+		return domain.Customer{}, err
+	}
 	c, err := s.UpdateCustomerContact(ctx, id, CustomerContact{Name: in.Name, RIF: in.RIF, Phone: in.Phone})
 	if err != nil {
 		return domain.Customer{}, err
 	}
 	c.Route, c.CreditLimitUSD, c.CreditDays = strings.TrimSpace(in.Route), in.CreditLimitUSD, in.CreditDays
+	c.Address, c.Lat, c.Lng = strings.TrimSpace(in.Address), in.Lat, in.Lng
 	if err := s.customers.Update(ctx, &c); err != nil {
 		return domain.Customer{}, err
 	}

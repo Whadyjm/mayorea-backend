@@ -155,19 +155,19 @@ func (r lotRepo) AddQuantity(ctx context.Context, id int64, delta int) error {
 
 type customerRepo struct{ d *DB }
 
-const customerSelect = `select id, name, rif, route, phone, credit_limit_usd, credit_days from customers`
+const customerSelect = `select id, name, rif, route, phone, credit_limit_usd, credit_days, address, lat, lng, coalesce(owner_id, 0) from customers`
 
 func scanCustomer(row pgx.Row) (domain.Customer, error) {
 	var c domain.Customer
-	err := row.Scan(&c.ID, &c.Name, &c.RIF, &c.Route, &c.Phone, &c.CreditLimitUSD, &c.CreditDays)
+	err := row.Scan(&c.ID, &c.Name, &c.RIF, &c.Route, &c.Phone, &c.CreditLimitUSD, &c.CreditDays, &c.Address, &c.Lat, &c.Lng, &c.OwnerID)
 	return c, err
 }
 
 func (r customerRepo) Create(ctx context.Context, c *domain.Customer) error {
 	err := r.d.q(ctx).QueryRow(ctx,
-		`insert into customers (name, rif, route, phone, credit_limit_usd, credit_days)
-		 values ($1, $2, $3, $4, $5, $6) returning id`,
-		c.Name, c.RIF, c.Route, c.Phone, c.CreditLimitUSD, c.CreditDays).Scan(&c.ID)
+		`insert into customers (name, rif, route, phone, credit_limit_usd, credit_days, address, lat, lng, owner_id)
+		 values ($1, $2, $3, $4, $5, $6, $7, $8, $9, nullif($10, 0)) returning id`,
+		c.Name, c.RIF, c.Route, c.Phone, c.CreditLimitUSD, c.CreditDays, c.Address, c.Lat, c.Lng, c.OwnerID).Scan(&c.ID)
 	if isUniqueViolation(err) {
 		return domain.Conflict("Ya existe un cliente con el RIF %s.", c.RIF)
 	}
@@ -331,8 +331,9 @@ func (r companyRepo) Save(ctx context.Context, customerID int64, c domain.Compan
 
 func (r customerRepo) Update(ctx context.Context, c *domain.Customer) error {
 	tag, err := r.d.q(ctx).Exec(ctx,
-		`update customers set name = $2, rif = $3, route = $4, phone = $5, credit_limit_usd = $6, credit_days = $7 where id = $1`,
-		c.ID, c.Name, c.RIF, c.Route, c.Phone, c.CreditLimitUSD, c.CreditDays)
+		`update customers set name = $2, rif = $3, route = $4, phone = $5, credit_limit_usd = $6, credit_days = $7,
+		 address = $8, lat = $9, lng = $10 where id = $1`,
+		c.ID, c.Name, c.RIF, c.Route, c.Phone, c.CreditLimitUSD, c.CreditDays, c.Address, c.Lat, c.Lng)
 	if isUniqueViolation(err) {
 		return domain.Conflict("Ya existe un cliente con el RIF %s.", c.RIF)
 	}

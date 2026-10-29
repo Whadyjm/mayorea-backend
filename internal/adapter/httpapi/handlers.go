@@ -171,6 +171,9 @@ func (h handlers) createCustomer(w http.ResponseWriter, r *http.Request) {
 		Phone          string       `json:"phone"`
 		CreditLimitUSD domain.Cents `json:"creditLimitUsd"`
 		CreditDays     int          `json:"creditDays"`
+		Address        string       `json:"address"`
+		Lat            *float64     `json:"lat"`
+		Lng            *float64     `json:"lng"`
 	}
 	if err := decode(r, &in); err != nil {
 		writeError(w, r, err)
@@ -178,12 +181,92 @@ func (h handlers) createCustomer(w http.ResponseWriter, r *http.Request) {
 	}
 	c, err := h.Catalog.CreateCustomer(r.Context(), usecase.NewCustomer{
 		Name: in.Name, RIF: in.RIF, Route: in.Route, Phone: in.Phone, CreditLimitUSD: in.CreditLimitUSD, CreditDays: in.CreditDays,
+		Address: in.Address, Lat: in.Lat, Lng: in.Lng,
 	})
 	if err != nil {
 		writeError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, toCustomer(c))
+}
+
+// ---------- a commerce's own clients ----------
+
+type clientBody struct {
+	Name           string       `json:"name"`
+	RIF            string       `json:"rif"`
+	Route          string       `json:"route"`
+	Phone          string       `json:"phone"`
+	CreditLimitUSD domain.Cents `json:"creditLimitUsd"`
+	CreditDays     int          `json:"creditDays"`
+	Address        string       `json:"address"`
+	Lat            *float64     `json:"lat"`
+	Lng            *float64     `json:"lng"`
+}
+
+func (b clientBody) customer() usecase.NewCustomer {
+	return usecase.NewCustomer{
+		Name: b.Name, RIF: b.RIF, Route: b.Route, Phone: b.Phone, CreditLimitUSD: b.CreditLimitUSD, CreditDays: b.CreditDays,
+		Address: b.Address, Lat: b.Lat, Lng: b.Lng,
+	}
+}
+
+// Only commerce accounts keep a client list; the office has its customers under /customers.
+func (h handlers) listClients(w http.ResponseWriter, r *http.Request) {
+	own, scoped := shopScope(r)
+	if !scoped {
+		writeError(w, r, domain.Forbidden("Solo un comercio tiene su propia lista de clientes."))
+		return
+	}
+	cs, err := h.Catalog.ListClients(r.Context(), own)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, mapList(cs, toCustomer))
+}
+
+func (h handlers) createClient(w http.ResponseWriter, r *http.Request) {
+	own, scoped := shopScope(r)
+	if !scoped {
+		writeError(w, r, domain.Forbidden("Solo un comercio tiene su propia lista de clientes."))
+		return
+	}
+	var in clientBody
+	if err := decode(r, &in); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	c, err := h.Catalog.CreateClient(r.Context(), own, in.customer())
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, toCustomer(c))
+}
+
+func (h handlers) updateClient(w http.ResponseWriter, r *http.Request) {
+	own, scoped := shopScope(r)
+	if !scoped {
+		writeError(w, r, domain.Forbidden("Solo un comercio tiene su propia lista de clientes."))
+		return
+	}
+	id, err := pathID(r, "id")
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	var in clientBody
+	if err := decode(r, &in); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	c, err := h.Catalog.UpdateClient(r.Context(), own, id, in.customer())
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toCustomer(c))
 }
 
 func (h handlers) customerCredit(w http.ResponseWriter, r *http.Request) {
@@ -556,6 +639,9 @@ func (h handlers) updateCustomer(w http.ResponseWriter, r *http.Request) {
 		Phone          string       `json:"phone"`
 		CreditLimitUSD domain.Cents `json:"creditLimitUsd"`
 		CreditDays     int          `json:"creditDays"`
+		Address        string       `json:"address"`
+		Lat            *float64     `json:"lat"`
+		Lng            *float64     `json:"lng"`
 	}
 	if err := decode(r, &in); err != nil {
 		writeError(w, r, err)
@@ -571,6 +657,7 @@ func (h handlers) updateCustomer(w http.ResponseWriter, r *http.Request) {
 	} else {
 		c, err = h.Catalog.UpdateCustomer(r.Context(), id, usecase.NewCustomer{
 			Name: in.Name, RIF: in.RIF, Route: in.Route, Phone: in.Phone, CreditLimitUSD: in.CreditLimitUSD, CreditDays: in.CreditDays,
+			Address: in.Address, Lat: in.Lat, Lng: in.Lng,
 		})
 	}
 	if err != nil {

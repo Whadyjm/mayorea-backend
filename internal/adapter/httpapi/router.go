@@ -74,6 +74,9 @@ func NewRouter(svc Services, opt Options) http.Handler {
 	route("POST /customers", domain.PermCustomersWrite, h.createCustomer)
 	route("PUT /customers/{id}", domain.PermCustomersEdit, h.updateCustomer)
 	route("GET /customers/{id}/credit", domain.PermOrdersRead, h.customerCredit)
+	route("GET /clients", domain.PermClientsManage, h.listClients)
+	route("POST /clients", domain.PermClientsManage, h.createClient)
+	route("PUT /clients/{id}", domain.PermClientsManage, h.updateClient)
 	mux.HandleFunc("GET "+v+"/trucks", h.requireAny(h.listTrucks, domain.PermCatalogRead, domain.PermFleetManage))
 	mux.HandleFunc("POST "+v+"/trucks", h.requireAny(h.createTruck, domain.PermCatalogWrite, domain.PermFleetManage))
 

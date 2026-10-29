@@ -469,3 +469,57 @@ func TestCommerceManagesItsOwnFleet(t *testing.T) {
 	a.expect(http.StatusForbidden, "PATCH", "/api/v1/users/1", shop, map[string]any{"name": "X", "role": "chofer", "active": true, "truckId": truck.ID})
 	a.expect(http.StatusForbidden, "POST", "/api/v1/trucks/"+itoa(truck.ID)+"/dispatch", shop, nil)
 }
+
+func TestCommerceKeepsItsOwnClientsAndAddress(t *testing.T) {
+	a := newApp(t)
+	ctx := context.Background()
+	mine, _ := a.catalog.CreateCustomer(ctx, usecase.NewCustomer{Name: "Abasto Sol", RIF: "J-12345678-9", Route: "Norte", CreditLimitUSD: 100_000, CreditDays: 7})
+	other, _ := a.catalog.CreateCustomer(ctx, usecase.NewCustomer{Name: "Bodega Luna", RIF: "J-98765432-1", Route: "Sur", CreditLimitUSD: 100_000, CreditDays: 7})
+	shop := a.shop("sol@g.com", mine.ID)
+	luna := a.shop("luna@g.com", other.ID)
+	owner := a.user(domain.RoleOwner, "dueno@g.com", 0)
+
+	// The office registers where a commerce is; the location travels with the customer.
+	a.expect(http.StatusCreated, "POST", "/api/v1/customers", owner, map[string]any{
+		"name": "Panadería Sur", "rif": "J-11111111-1", "route": "Sur", "address": "Av. Bolívar", "lat": 10.18, "lng": -68.0, "creditLimitUsd": 0, "creditDays": 0})
+	a.expect(http.StatusBadRequest, "POST", "/api/v1/customers", owner, map[string]any{"name": "X", "rif": "J-22222222-2", "lat": 10.18})
+
+	// A commerce adds clients to its own list.
+	client := map[string]any{"name": "Cliente de Sol", "rif": "V-12345678-0", "route": "Centro", "phone": "0241-1", "creditLimitUsd": 5000, "creditDays": 7}
+	rec := a.do("POST", "/api/v1/clients", shop, client)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("shop creates client: %d %s", rec.Code, rec.Body)
+	}
+	var created struct{ ID int64 }
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+	names := func(token, path string) []string {
+		var cs []struct{ Name string }
+		_ = json.Unmarshal(a.do("GET", path, token, nil).Body.Bytes(), &cs)
+		out := []string{}
+		for _, c := range cs {
+			out = append(out, c.Name)
+		}
+		return out
+	}
+	if got := names(shop, "/api/v1/clients"); len(got) != 1 || got[0] != "Cliente de Sol" {
+		t.Fatalf("shop clients = %v", got)
+	}
+	if got := names(luna, "/api/v1/clients"); len(got) != 0 {
+		t.Fatalf("another commerce sees %v, want none", got)
+	}
+
+	// They never mix into the distributor's customers, nor into a commerce's own account.
+	for _, n := range names(owner, "/api/v1/customers") {
+		if n == "Cliente de Sol" {
+			t.Fatalf("a commerce's client showed up among the distributor's customers")
+		}
+	}
+	if got := names(shop, "/api/v1/customers"); len(got) != 1 || got[0] != "Abasto Sol" {
+		t.Fatalf("shop customers = %v, want only itself", got)
+	}
+
+	// Another commerce cannot edit it; the owner has no client list of its own.
+	a.expect(http.StatusNotFound, "PUT", "/api/v1/clients/"+itoa(created.ID), luna, client)
+	a.expect(http.StatusOK, "PUT", "/api/v1/clients/"+itoa(created.ID), shop, client)
+	a.expect(http.StatusForbidden, "GET", "/api/v1/clients", owner, nil)
+}

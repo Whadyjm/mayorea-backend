@@ -42,6 +42,9 @@ type Customer struct {
 	Phone          string
 	CreditLimitUSD Cents
 	CreditDays     int
+	Address        string
+	Lat, Lng       *float64 // where it is; both set or both nil
+	OwnerID        int64    // the commerce this client belongs to; 0 for the distributor's customers
 }
 
 type Truck struct {
