@@ -19,6 +19,7 @@ import (
 	platformauth "github.com/mayorea/backend/internal/platform/auth"
 	"github.com/mayorea/backend/internal/platform/clock"
 	"github.com/mayorea/backend/internal/platform/config"
+	"github.com/mayorea/backend/internal/platform/ratefeed"
 	"github.com/mayorea/backend/internal/usecase"
 	"github.com/mayorea/backend/migrations"
 )
@@ -115,6 +116,14 @@ func run() error {
 		Collections: collections,
 		Trips: usecase.NewTripService(st, st.trips, st.trucks, st.orders, st.customers, st.products, st.invoices,
 			st.lots, st.rates, dispatch, orders, collections, clk),
+	}
+
+	if cfg.RateFeedURL != "off" {
+		rates := usecase.NewRateService(st.rates, ratefeed.NewDolarAPI(cfg.RateFeedURL), clk)
+		go rates.Run(ctx, cfg.RateSyncInterval)
+		slog.Info("bcv rate sync on", "url", cfg.RateFeedURL, "every", cfg.RateSyncInterval)
+	} else {
+		slog.Warn("RATE_FEED_URL=off: the BCV rate is only changed by hand")
 	}
 
 	srv := &http.Server{

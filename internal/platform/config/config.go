@@ -16,6 +16,10 @@ type Config struct {
 	Timezone       string   // business day zone
 	SessionTTL     time.Duration
 
+	// RateFeedURL is the public BCV feed the daily rate is read from; "off" disables the sync.
+	RateFeedURL      string
+	RateSyncInterval time.Duration
+
 	// AccessAllowlist, when not empty, is the only set of emails that may have
 	// an account or sign in. Empty means no restriction.
 	AccessAllowlist []string
@@ -53,6 +57,7 @@ func Load() (Config, error) {
 		DatabaseURL:    os.Getenv("DATABASE_URL"),
 		AllowedOrigins: split(get("CORS_ORIGINS", "http://localhost:5173")),
 		Timezone:       get("TIMEZONE", "America/Caracas"),
+		RateFeedURL:    get("RATE_FEED_URL", "https://ve.dolarapi.com/v1/dolares/oficial"),
 
 		AccessAllowlist: split(os.Getenv("ACCESS_ALLOWLIST")),
 	}
@@ -66,6 +71,11 @@ func Load() (Config, error) {
 		return c, fmt.Errorf("SESSION_TTL must be a positive duration like 24h")
 	}
 	c.SessionTTL = ttl
+	syncEvery, err := time.ParseDuration(get("RATE_SYNC_INTERVAL", "30m"))
+	if err != nil || syncEvery < time.Minute {
+		return c, fmt.Errorf("RATE_SYNC_INTERVAL must be a duration of at least 1m, like 30m")
+	}
+	c.RateSyncInterval = syncEvery
 	switch c.Storage {
 	case "memory":
 	case "postgres":

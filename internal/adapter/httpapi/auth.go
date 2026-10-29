@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -48,6 +49,20 @@ func (h handlers) require(perm domain.Permission, next http.HandlerFunc) http.Ha
 		}
 		next(w, r.WithContext(context.WithValue(r.Context(), principalKey{}, p)))
 	}
+}
+
+// requireAny is require for routes open to more than one permission.
+func (h handlers) requireAny(next http.HandlerFunc, perms ...domain.Permission) http.HandlerFunc {
+	return h.require("", func(w http.ResponseWriter, r *http.Request) {
+		p, _ := principalFrom(r.Context())
+		for _, perm := range perms {
+			if p.Can(perm) {
+				next(w, r)
+				return
+			}
+		}
+		writeError(w, r, domain.Forbidden("No tienes permiso para hacer esto."))
+	})
 }
 
 // ownTruck restricts drivers to the truck assigned to them (the {id} in the path).
@@ -186,6 +201,21 @@ func (h handlers) listUsers(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
+	if cid, scoped := shopScope(r); scoped {
+		// A commerce sees only the drivers of its own trucks.
+		ts, err := h.Catalog.ListTrucks(r.Context())
+		if err != nil {
+			writeError(w, r, err)
+			return
+		}
+		mine := map[int64]bool{}
+		for _, t := range ts {
+			if t.CustomerID == cid {
+				mine[t.ID] = true
+			}
+		}
+		us = slices.DeleteFunc(us, func(u domain.User) bool { return u.Role != domain.RoleDriver || !mine[u.TruckID] })
+	}
 	writeJSON(w, http.StatusOK, mapList(us, toUser))
 }
 
@@ -201,6 +231,19 @@ func (h handlers) createUser(w http.ResponseWriter, r *http.Request) {
 	if err := decode(r, &in); err != nil {
 		writeError(w, r, err)
 		return
+	}
+	if cid, scoped := shopScope(r); scoped {
+		// A commerce only adds drivers, and only to its own trucks.
+		if in.Role != domain.RoleDriver {
+			writeError(w, r, domain.Forbidden("Solo puedes crear choferes para tus camiones."))
+			return
+		}
+		in.CustomerID = 0
+		t, err := h.Catalog.GetTruck(r.Context(), in.TruckID)
+		if err != nil || t.CustomerID != cid {
+			writeError(w, r, domain.NotFound("Camión no encontrado."))
+			return
+		}
 	}
 	u, err := h.Auth.CreateUser(r.Context(), usecase.NewUser{Name: in.Name, Email: in.Email, Password: in.Password, Role: in.Role, TruckID: in.TruckID, CustomerID: in.CustomerID})
 	if err != nil {

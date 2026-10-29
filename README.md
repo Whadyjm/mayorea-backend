@@ -66,7 +66,7 @@ Todo requiere sesión salvo `GET /health` y `POST /auth/login`.
 
 | Método | Ruta | |
 |---|---|---|
-| GET/PUT | `/exchange-rate` | tasa BCV `{rate}` en diezmilésimas |
+| GET/PUT | `/exchange-rate` | tasa BCV `{rate, updatedOn, updatedAt, source}` en diezmilésimas. Se lee sola de DolarApi (`RATE_FEED_URL`, cada `RATE_SYNC_INTERVAL`) y se guarda en la tabla `settings`; todas las plataformas la leen de aquí. `PUT` la fija a mano y se respeta hasta que el BCV publique un día posterior |
 | GET/PUT | `/company` | ficha de la empresa (nombre, RIF, contacto, logo): la lee cualquier usuario con sesión, solo el `admin` la edita |
 | GET/POST | `/products` · `/products/{id}/lots` | catálogo y recepción de lotes |
 | GET | `/lots` | todos los lotes con existencia (la vista del galpón, en una sola llamada) |

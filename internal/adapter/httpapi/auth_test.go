@@ -239,10 +239,10 @@ func TestCommerceSeesOnlyItsOwnAccount(t *testing.T) {
 	shop := a.shop("sol@g.com", mine.ID)
 	owner := a.user(domain.RoleOwner, "dueno@g.com", 0)
 
-	// Browsing: products and the rate are open; stock, trucks, trips and users are not.
+	// Browsing: products and the rate are open; stock and trips are not (its own fleet has its own test).
 	a.expect(http.StatusOK, "GET", "/api/v1/products", shop, nil)
 	a.expect(http.StatusOK, "GET", "/api/v1/exchange-rate", shop, nil)
-	for _, path := range []string{"/api/v1/lots", "/api/v1/trucks", "/api/v1/trips", "/api/v1/users"} {
+	for _, path := range []string{"/api/v1/lots", "/api/v1/trips"} {
 		a.expect(http.StatusForbidden, "GET", path, shop, nil)
 	}
 
@@ -413,4 +413,59 @@ func TestCommerceKeepsItsOwnCompanyProfile(t *testing.T) {
 	if g := get(shopB); g["tradeName"] != "Bodega Luna" {
 		t.Fatalf("shop B after the distributor saved = %v", g)
 	}
+}
+
+func TestCommerceManagesItsOwnFleet(t *testing.T) {
+	a := newApp(t)
+	ctx := context.Background()
+	mine, _ := a.catalog.CreateCustomer(ctx, usecase.NewCustomer{Name: "Abasto Sol", RIF: "J-12345678-9", Route: "Norte", CreditLimitUSD: 100_000, CreditDays: 7})
+	other, _ := a.catalog.CreateCustomer(ctx, usecase.NewCustomer{Name: "Bodega Luna", RIF: "J-98765432-1", Route: "Sur", CreditLimitUSD: 100_000, CreditDays: 7})
+	shop := a.shop("sol@g.com", mine.ID)
+	luna := a.shop("luna@g.com", other.ID)
+	owner := a.user(domain.RoleOwner, "dueno@g.com", 0)
+	own, _ := a.catalog.CreateTruck(ctx, usecase.NewTruck{Name: "De la distribuidora"})
+
+	// Creating a truck: the owner comes from the session, so the body cannot name one.
+	a.expect(http.StatusBadRequest, "POST", "/api/v1/trucks", shop, map[string]any{"name": "Robado", "customerId": other.ID})
+	rec := a.do("POST", "/api/v1/trucks", shop, map[string]any{"name": "Triton", "routes": []string{"Valencia"}})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("shop creates truck: %d %s", rec.Code, rec.Body)
+	}
+	var truck struct{ ID int64 }
+	_ = json.Unmarshal(rec.Body.Bytes(), &truck)
+	lunaTruck, _ := a.catalog.CreateTruck(ctx, usecase.NewTruck{Name: "De Luna", CustomerID: other.ID})
+
+	// Each commerce lists only its own trucks; the owner sees them all.
+	count := func(token string) int {
+		var ts []struct{ ID int64 }
+		_ = json.Unmarshal(a.do("GET", "/api/v1/trucks", token, nil).Body.Bytes(), &ts)
+		return len(ts)
+	}
+	if n := count(shop); n != 1 {
+		t.Fatalf("shop sees %d trucks, want 1", n)
+	}
+	if n := count(luna); n != 1 {
+		t.Fatalf("luna sees %d trucks, want 1 (not the one the other commerce made)", n)
+	}
+	if n := count(owner); n != 3 {
+		t.Fatalf("owner sees %d trucks, want 3", n)
+	}
+
+	// Drivers: only for its own trucks, and only the driver role.
+	driver := func(email string, truckID int64) map[string]any {
+		return map[string]any{"name": "Pedro", "email": email, "password": "clave-segura-1", "role": "chofer", "truckId": truckID}
+	}
+	a.expect(http.StatusCreated, "POST", "/api/v1/users", shop, driver("pedro@g.com", truck.ID))
+	a.expect(http.StatusNotFound, "POST", "/api/v1/users", shop, driver("ajeno@g.com", lunaTruck.ID))
+	a.expect(http.StatusNotFound, "POST", "/api/v1/users", shop, driver("dist@g.com", own.ID))
+	a.expect(http.StatusForbidden, "POST", "/api/v1/users", shop, map[string]any{"name": "X", "email": "x@g.com", "password": "clave-segura-1", "role": "admin"})
+	var us []struct{ Email string }
+	_ = json.Unmarshal(a.do("GET", "/api/v1/users", shop, nil).Body.Bytes(), &us)
+	if len(us) != 1 || us[0].Email != "pedro@g.com" {
+		t.Fatalf("shop lists %+v, want only its own driver", us)
+	}
+
+	// It still cannot edit users or reach the office's dispatch.
+	a.expect(http.StatusForbidden, "PATCH", "/api/v1/users/1", shop, map[string]any{"name": "X", "role": "chofer", "active": true, "truckId": truck.ID})
+	a.expect(http.StatusForbidden, "POST", "/api/v1/trucks/"+itoa(truck.ID)+"/dispatch", shop, nil)
 }

@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -28,10 +29,11 @@ type rateDTO struct {
 	Rate      domain.Rate `json:"rate"`
 	UpdatedOn string      `json:"updatedOn"`
 	UpdatedAt string      `json:"updatedAt"` // RFC 3339
+	Source    string      `json:"source"`    // "dolarapi" (the BCV feed) or "manual"
 }
 
 func toRate(er domain.ExchangeRate) rateDTO {
-	return rateDTO{er.Rate, fmtDate(er.UpdatedOn), er.UpdatedAt.UTC().Format(time.RFC3339)}
+	return rateDTO{er.Rate, fmtDate(er.UpdatedOn), er.UpdatedAt.UTC().Format(time.RFC3339), er.Source}
 }
 
 func (h handlers) getRate(w http.ResponseWriter, r *http.Request) {
@@ -324,6 +326,9 @@ func (h handlers) listTrucks(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
+	if cid, scoped := shopScope(r); scoped {
+		ts = slices.DeleteFunc(ts, func(t domain.Truck) bool { return t.CustomerID != cid })
+	}
 	writeJSON(w, http.StatusOK, mapList(ts, toTruck))
 }
 
@@ -337,7 +342,9 @@ func (h handlers) createTruck(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	t, err := h.Catalog.CreateTruck(r.Context(), usecase.NewTruck{Name: in.Name, Driver: in.Driver, Routes: in.Routes})
+	// A commerce's truck is always its own, whatever the body says.
+	owner, _ := shopScope(r)
+	t, err := h.Catalog.CreateTruck(r.Context(), usecase.NewTruck{Name: in.Name, Driver: in.Driver, Routes: in.Routes, CustomerID: owner})
 	if err != nil {
 		writeError(w, r, err)
 		return

@@ -137,16 +137,17 @@ func (s *CatalogService) ListCustomers(ctx context.Context) ([]domain.Customer, 
 }
 
 type NewTruck struct {
-	Name   string
-	Driver string
-	Routes []string
+	Name       string
+	Driver     string
+	Routes     []string
+	CustomerID int64 // 0 for the distributor's own fleet
 }
 
 func (s *CatalogService) CreateTruck(ctx context.Context, in NewTruck) (domain.Truck, error) {
 	if strings.TrimSpace(in.Name) == "" {
 		return domain.Truck{}, domain.Invalid("Escribe el nombre del camión.")
 	}
-	t := domain.Truck{Name: strings.TrimSpace(in.Name), Driver: strings.TrimSpace(in.Driver), Routes: in.Routes}
+	t := domain.Truck{Name: strings.TrimSpace(in.Name), Driver: strings.TrimSpace(in.Driver), Routes: in.Routes, CustomerID: in.CustomerID}
 	if err := s.trucks.Create(ctx, &t); err != nil {
 		return domain.Truck{}, err
 	}
@@ -155,6 +156,10 @@ func (s *CatalogService) CreateTruck(ctx context.Context, in NewTruck) (domain.T
 
 func (s *CatalogService) ListTrucks(ctx context.Context) ([]domain.Truck, error) {
 	return s.trucks.List(ctx)
+}
+
+func (s *CatalogService) GetTruck(ctx context.Context, id int64) (domain.Truck, error) {
+	return s.trucks.Get(ctx, id)
 }
 
 func (s *CatalogService) CurrentRate(ctx context.Context) (domain.ExchangeRate, error) {
@@ -166,7 +171,7 @@ func (s *CatalogService) SetRate(ctx context.Context, rate domain.Rate) (domain.
 	if rate <= 0 {
 		return domain.ExchangeRate{}, domain.Invalid("La tasa debe ser mayor a cero.")
 	}
-	r := domain.ExchangeRate{Rate: rate, UpdatedOn: s.clock.Today(), UpdatedAt: s.clock.Now()}
+	r := domain.ExchangeRate{Rate: rate, UpdatedOn: s.clock.Today(), UpdatedAt: s.clock.Now(), Source: domain.RateSourceManual}
 	if err := s.rates.Set(ctx, r); err != nil {
 		return domain.ExchangeRate{}, err
 	}

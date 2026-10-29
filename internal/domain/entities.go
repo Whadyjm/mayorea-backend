@@ -45,10 +45,11 @@ type Customer struct {
 }
 
 type Truck struct {
-	ID     int64
-	Name   string
-	Driver string
-	Routes []string
+	ID         int64
+	Name       string
+	Driver     string
+	Routes     []string
+	CustomerID int64 // the commerce that owns it; 0 for the distributor's own fleet
 }
 
 func (t Truck) Serves(route string) bool {
@@ -64,4 +65,11 @@ type ExchangeRate struct {
 	Rate      Rate
 	UpdatedOn time.Time // business day it applies to
 	UpdatedAt time.Time // exact instant it was set
+	Source    string    // where it came from: RateSourceManual or RateSourceFeed
 }
+
+// Where an exchange rate came from.
+const (
+	RateSourceManual = "manual"   // typed in by someone with permission
+	RateSourceFeed   = "dolarapi" // fetched from the public BCV feed
+)

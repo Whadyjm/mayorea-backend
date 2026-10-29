@@ -52,8 +52,9 @@ func NewRouter(svc Services, opt Options) http.Handler {
 	route("POST /auth/password", "", h.changePassword)
 
 	// Users.
-	route("GET /users", domain.PermUsersManage, h.listUsers)
-	route("POST /users", domain.PermUsersManage, h.createUser)
+	// A commerce (fleet.manage) lists and adds the drivers of its own trucks; the handlers narrow it.
+	mux.HandleFunc("GET "+v+"/users", h.requireAny(h.listUsers, domain.PermUsersManage, domain.PermFleetManage))
+	mux.HandleFunc("POST "+v+"/users", h.requireAny(h.createUser, domain.PermUsersManage, domain.PermFleetManage))
 	route("PATCH /users/{id}", domain.PermUsersManage, h.updateUser)
 	route("POST /users/{id}/password", domain.PermUsersManage, h.resetPassword)
 
@@ -73,8 +74,8 @@ func NewRouter(svc Services, opt Options) http.Handler {
 	route("POST /customers", domain.PermCustomersWrite, h.createCustomer)
 	route("PUT /customers/{id}", domain.PermCustomersEdit, h.updateCustomer)
 	route("GET /customers/{id}/credit", domain.PermOrdersRead, h.customerCredit)
-	route("GET /trucks", domain.PermCatalogRead, h.listTrucks)
-	route("POST /trucks", domain.PermCatalogWrite, h.createTruck)
+	mux.HandleFunc("GET "+v+"/trucks", h.requireAny(h.listTrucks, domain.PermCatalogRead, domain.PermFleetManage))
+	mux.HandleFunc("POST "+v+"/trucks", h.requireAny(h.createTruck, domain.PermCatalogWrite, domain.PermFleetManage))
 
 	// Orders.
 	route("GET /orders", domain.PermOrdersRead, h.listOrders)

@@ -366,7 +366,7 @@ type truckRepo struct{ s *Store }
 func (r truckRepo) Create(ctx context.Context, t *domain.Truck) error {
 	defer r.s.lock(ctx)()
 	t.ID = r.s.next("truck")
-	r.s.trucks[t.ID] = domain.Truck{ID: t.ID, Name: t.Name, Driver: t.Driver, Routes: slices.Clone(t.Routes)}
+	r.s.trucks[t.ID] = domain.Truck{ID: t.ID, Name: t.Name, Driver: t.Driver, Routes: slices.Clone(t.Routes), CustomerID: t.CustomerID}
 	return nil
 }
 

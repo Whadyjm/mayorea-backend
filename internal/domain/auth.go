@@ -39,13 +39,14 @@ const (
 	PermTripsSettle      Permission = "trips.settle"  // office approves the driver's count
 	PermUsersManage      Permission = "users.manage"
 	PermCompanyWrite     Permission = "company.write" // edit the own profile: the distributor's (admin) or a commerce's
+	PermFleetManage      Permission = "fleet.manage"  // create and list trucks and their drivers; a commerce only its own
 )
 
 var allPermissions = []Permission{
 	PermCatalogBrowse, PermCatalogRead, PermCatalogWrite, PermCustomersWrite, PermCustomersEdit, PermRateWrite,
 	PermOrdersRead, PermOrdersCreate, PermOrdersApprove, PermDispatchManage,
 	PermCollectionsRead, PermCollectionsWrite, PermTripsDepart, PermTripsRead, PermTripsOperate,
-	PermTripsSettle, PermUsersManage, PermCompanyWrite,
+	PermTripsSettle, PermUsersManage, PermCompanyWrite, PermFleetManage,
 }
 
 var rolePermissions = map[Role][]Permission{
@@ -66,7 +67,7 @@ var rolePermissions = map[Role][]Permission{
 	// A commerce works only on its own account: the handlers scope orders, invoices
 	// and the customer list to Principal.CustomerID.
 	RoleShop: {
-		PermCatalogBrowse, PermCustomersEdit, PermOrdersRead, PermOrdersCreate, PermCollectionsRead, PermCompanyWrite,
+		PermCatalogBrowse, PermCustomersEdit, PermOrdersRead, PermOrdersCreate, PermCollectionsRead, PermCompanyWrite, PermFleetManage,
 	},
 }
 

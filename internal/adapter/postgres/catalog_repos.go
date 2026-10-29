@@ -2,7 +2,10 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -220,12 +223,12 @@ func (r truckRepo) Create(ctx context.Context, t *domain.Truck) error {
 		routes = []string{}
 	}
 	return r.d.q(ctx).QueryRow(ctx,
-		`insert into trucks (name, driver, routes) values ($1, $2, $3) returning id`,
-		t.Name, t.Driver, routes).Scan(&t.ID)
+		`insert into trucks (name, driver, routes, customer_id) values ($1, $2, $3, nullif($4, 0)) returning id`,
+		t.Name, t.Driver, routes, t.CustomerID).Scan(&t.ID)
 }
 
 func (r truckRepo) List(ctx context.Context) ([]domain.Truck, error) {
-	rows, err := r.d.q(ctx).Query(ctx, `select id, name, driver, routes from trucks order by id`)
+	rows, err := r.d.q(ctx).Query(ctx, `select id, name, driver, routes, coalesce(customer_id, 0) from trucks order by id`)
 	if err != nil {
 		return nil, err
 	}
@@ -233,7 +236,7 @@ func (r truckRepo) List(ctx context.Context) ([]domain.Truck, error) {
 	var out []domain.Truck
 	for rows.Next() {
 		var t domain.Truck
-		if err := rows.Scan(&t.ID, &t.Name, &t.Driver, &t.Routes); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.Driver, &t.Routes, &t.CustomerID); err != nil {
 			return nil, err
 		}
 		out = append(out, t)
@@ -243,27 +246,53 @@ func (r truckRepo) List(ctx context.Context) ([]domain.Truck, error) {
 
 func (r truckRepo) Get(ctx context.Context, id int64) (domain.Truck, error) {
 	var t domain.Truck
-	err := r.d.q(ctx).QueryRow(ctx, `select id, name, driver, routes from trucks where id = $1`, id).
-		Scan(&t.ID, &t.Name, &t.Driver, &t.Routes)
+	err := r.d.q(ctx).QueryRow(ctx, `select id, name, driver, routes, coalesce(customer_id, 0) from trucks where id = $1`, id).
+		Scan(&t.ID, &t.Name, &t.Driver, &t.Routes, &t.CustomerID)
 	return t, notFoundIf(err, "Camión")
 }
 
 // ---------- exchange rate ----------
 
+// The BCV rate of the day lives in the settings table (key bcv_rate); every client reads it from there
+// through the API. Each change is also appended to exchange_rates as a history.
 type rateRepo struct{ d *DB }
 
+const bcvRateKey = "bcv_rate"
+
+type rateValue struct {
+	Rate        domain.Rate `json:"rate"`
+	EffectiveOn string      `json:"effectiveOn"` // YYYY-MM-DD
+	UpdatedAt   time.Time   `json:"updatedAt"`
+	Source      string      `json:"source"`
+}
+
 func (r rateRepo) Current(ctx context.Context) (domain.ExchangeRate, error) {
-	var er domain.ExchangeRate
-	err := r.d.q(ctx).QueryRow(ctx, `select rate, effective_on, created_at from exchange_rates order by id desc limit 1`).
-		Scan(&er.Rate, &er.UpdatedOn, &er.UpdatedAt)
-	if err != nil {
-		return er, notFoundIf(err, "Tasa BCV")
+	var raw []byte
+	if err := r.d.q(ctx).QueryRow(ctx, `select value from settings where key = $1`, bcvRateKey).Scan(&raw); err != nil {
+		return domain.ExchangeRate{}, notFoundIf(err, "Tasa BCV")
 	}
-	return er, nil
+	var v rateValue
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return domain.ExchangeRate{}, fmt.Errorf("settings %s: %w", bcvRateKey, err)
+	}
+	on, err := time.Parse("2006-01-02", v.EffectiveOn)
+	if err != nil {
+		return domain.ExchangeRate{}, fmt.Errorf("settings %s: %w", bcvRateKey, err)
+	}
+	return domain.ExchangeRate{Rate: v.Rate, UpdatedOn: on, UpdatedAt: v.UpdatedAt, Source: v.Source}, nil
 }
 
 func (r rateRepo) Set(ctx context.Context, er domain.ExchangeRate) error {
-	_, err := r.d.q(ctx).Exec(ctx, `insert into exchange_rates (rate, effective_on) values ($1, $2)`, er.Rate, er.UpdatedOn)
+	raw, err := json.Marshal(rateValue{Rate: er.Rate, EffectiveOn: er.UpdatedOn.Format("2006-01-02"), UpdatedAt: er.UpdatedAt.UTC(), Source: er.Source})
+	if err != nil {
+		return err
+	}
+	if _, err := r.d.q(ctx).Exec(ctx,
+		`insert into settings (key, value) values ($1, $2)
+		 on conflict (key) do update set value = $2, updated_at = now()`, bcvRateKey, raw); err != nil {
+		return err
+	}
+	_, err = r.d.q(ctx).Exec(ctx, `insert into exchange_rates (rate, effective_on) values ($1, $2)`, er.Rate, er.UpdatedOn)
 	return err
 }
 
