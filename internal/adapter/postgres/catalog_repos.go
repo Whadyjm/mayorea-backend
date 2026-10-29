@@ -253,8 +253,8 @@ type rateRepo struct{ d *DB }
 
 func (r rateRepo) Current(ctx context.Context) (domain.ExchangeRate, error) {
 	var er domain.ExchangeRate
-	err := r.d.q(ctx).QueryRow(ctx, `select rate, effective_on from exchange_rates order by id desc limit 1`).
-		Scan(&er.Rate, &er.UpdatedOn)
+	err := r.d.q(ctx).QueryRow(ctx, `select rate, effective_on, created_at from exchange_rates order by id desc limit 1`).
+		Scan(&er.Rate, &er.UpdatedOn, &er.UpdatedAt)
 	if err != nil {
 		return er, notFoundIf(err, "Tasa BCV")
 	}

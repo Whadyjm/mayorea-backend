@@ -3,6 +3,7 @@ package httpapi
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/mayorea/backend/internal/domain"
 	"github.com/mayorea/backend/internal/usecase"
@@ -25,6 +26,11 @@ type handlers struct{ Services }
 type rateDTO struct {
 	Rate      domain.Rate `json:"rate"`
 	UpdatedOn string      `json:"updatedOn"`
+	UpdatedAt string      `json:"updatedAt"` // RFC 3339
+}
+
+func toRate(er domain.ExchangeRate) rateDTO {
+	return rateDTO{er.Rate, fmtDate(er.UpdatedOn), er.UpdatedAt.UTC().Format(time.RFC3339)}
 }
 
 func (h handlers) getRate(w http.ResponseWriter, r *http.Request) {
@@ -33,7 +39,7 @@ func (h handlers) getRate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, rateDTO{er.Rate, fmtDate(er.UpdatedOn)})
+	writeJSON(w, http.StatusOK, toRate(er))
 }
 
 func (h handlers) setRate(w http.ResponseWriter, r *http.Request) {
@@ -49,7 +55,7 @@ func (h handlers) setRate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, rateDTO{er.Rate, fmtDate(er.UpdatedOn)})
+	writeJSON(w, http.StatusOK, toRate(er))
 }
 
 // ---------- products & lots ----------
@@ -96,6 +102,15 @@ func (h handlers) listLots(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, mapList(ls, toLot))
 }
 
+func (h handlers) listStockedLots(w http.ResponseWriter, r *http.Request) {
+	ls, err := h.Catalog.ListStockedLots(r.Context())
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, mapList(ls, toLot))
+}
+
 func (h handlers) receiveLot(w http.ResponseWriter, r *http.Request) {
 	id, err := pathID(r, "id")
 	if err != nil {
@@ -133,6 +148,15 @@ func (h handlers) listCustomers(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
+	if own, scoped := shopScope(r); scoped {
+		mine := cs[:0:0]
+		for _, c := range cs {
+			if c.ID == own {
+				mine = append(mine, c)
+			}
+		}
+		cs = mine
+	}
 	writeJSON(w, http.StatusOK, mapList(cs, toCustomer))
 }
 
@@ -165,6 +189,10 @@ func (h handlers) customerCredit(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
+	if own, scoped := shopScope(r); scoped && id != own {
+		writeError(w, r, domain.NotFound("Cliente no encontrado."))
+		return
+	}
 	st, err := h.Orders.CustomerCredit(r.Context(), id)
 	if err != nil {
 		writeError(w, r, err)
@@ -180,6 +208,9 @@ func (h handlers) listOrders(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, r, err)
 		return
+	}
+	if own, scoped := shopScope(r); scoped {
+		cid = own
 	}
 	f := usecase.OrderFilter{CustomerID: cid}
 	if s := r.URL.Query().Get("status"); s != "" {
@@ -212,8 +243,12 @@ func (h handlers) createOrder(w http.ResponseWriter, r *http.Request) {
 	// A salesperson's orders are always attributed to them; office staff may
 	// enter an order on someone else's behalf.
 	p, _ := principalFrom(r.Context())
-	if p.Role == domain.RoleSalesperson || strings.TrimSpace(in.Salesperson) == "" {
+	if p.Role == domain.RoleSalesperson || p.Role == domain.RoleShop || strings.TrimSpace(in.Salesperson) == "" {
 		in.Salesperson = p.Name
+	}
+	// A commerce can only order for itself, whatever the body says.
+	if own, scoped := shopScope(r); scoped {
+		in.CustomerID = own
 	}
 	draft := domain.OrderDraft{
 		CustomerID: in.CustomerID, Terms: in.Terms, Channel: in.Channel, Salesperson: in.Salesperson, Note: in.Note,
@@ -238,6 +273,10 @@ func (h handlers) getOrder(w http.ResponseWriter, r *http.Request) {
 	o, err := h.Orders.Get(r.Context(), id)
 	if err != nil {
 		writeError(w, r, err)
+		return
+	}
+	if own, scoped := shopScope(r); scoped && o.CustomerID != own {
+		writeError(w, r, domain.NotFound("Pedido no encontrado."))
 		return
 	}
 	writeJSON(w, http.StatusOK, toOrder(o))
@@ -365,6 +404,9 @@ func (h handlers) listInvoices(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
+	if own, scoped := shopScope(r); scoped {
+		cid = own
+	}
 	is, err := h.Collections.ListInvoices(r.Context(), cid, r.URL.Query().Get("pending") == "true")
 	if err != nil {
 		writeError(w, r, err)
@@ -382,6 +424,10 @@ func (h handlers) getInvoice(w http.ResponseWriter, r *http.Request) {
 	i, err := h.Collections.GetInvoice(r.Context(), id)
 	if err != nil {
 		writeError(w, r, err)
+		return
+	}
+	if own, scoped := shopScope(r); scoped && i.CustomerID != own {
+		writeError(w, r, domain.NotFound("Factura no encontrada."))
 		return
 	}
 	writeJSON(w, http.StatusOK, toInvoice(i))

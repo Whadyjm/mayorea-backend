@@ -16,15 +16,15 @@ func (d *DB) Sessions() usecase.SessionRepository { return sessionRepo{d} }
 
 type userRepo struct{ d *DB }
 
-const userSelect = `select id, name, email, password_hash, role, active, coalesce(truck_id, 0) from users`
+const userSelect = `select id, name, email, password_hash, role, active, coalesce(truck_id, 0), coalesce(customer_id, 0) from users`
 
 func scanUser(row pgx.Row) (domain.User, error) {
 	var u domain.User
-	err := row.Scan(&u.ID, &u.Name, &u.Email, &u.PasswordHash, &u.Role, &u.Active, &u.TruckID)
+	err := row.Scan(&u.ID, &u.Name, &u.Email, &u.PasswordHash, &u.Role, &u.Active, &u.TruckID, &u.CustomerID)
 	return u, err
 }
 
-// truckArg maps "no truck" (0) to SQL NULL.
+// truckArg maps "no truck/customer" (0) to SQL NULL.
 func truckArg(id int64) *int64 {
 	if id == 0 {
 		return nil
@@ -34,8 +34,8 @@ func truckArg(id int64) *int64 {
 
 func (r userRepo) Create(ctx context.Context, u *domain.User) error {
 	err := r.d.q(ctx).QueryRow(ctx,
-		`insert into users (name, email, password_hash, role, active, truck_id) values ($1, $2, $3, $4, $5, $6) returning id`,
-		u.Name, u.Email, u.PasswordHash, u.Role, u.Active, truckArg(u.TruckID)).Scan(&u.ID)
+		`insert into users (name, email, password_hash, role, active, truck_id, customer_id) values ($1, $2, $3, $4, $5, $6, $7) returning id`,
+		u.Name, u.Email, u.PasswordHash, u.Role, u.Active, truckArg(u.TruckID), truckArg(u.CustomerID)).Scan(&u.ID)
 	if isUniqueViolation(err) {
 		return domain.Conflict("Ya existe un usuario con ese correo.")
 	}
@@ -67,8 +67,8 @@ func (r userRepo) Count(ctx context.Context) (int, error) {
 
 func (r userRepo) Update(ctx context.Context, u *domain.User) error {
 	tag, err := r.d.q(ctx).Exec(ctx,
-		`update users set name = $2, role = $3, active = $4, truck_id = $5, password_hash = $6 where id = $1`,
-		u.ID, u.Name, u.Role, u.Active, truckArg(u.TruckID), u.PasswordHash)
+		`update users set name = $2, role = $3, active = $4, truck_id = $5, customer_id = $7, password_hash = $6 where id = $1`,
+		u.ID, u.Name, u.Role, u.Active, truckArg(u.TruckID), u.PasswordHash, truckArg(u.CustomerID))
 	if err != nil {
 		return err
 	}

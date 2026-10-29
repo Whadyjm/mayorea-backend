@@ -50,7 +50,7 @@ Login con correo y contraseña (bcrypt) → token opaco que se manda como `Autho
 | `credito` | aprobar pedidos, cobrar, tasa BCV, clientes, aprobar liquidaciones |
 | `galpon` | productos, lotes, camiones, picking, despacho y salida de camiones |
 | `preventista` | ver catálogo y tomar pedidos (quedan a su nombre) |
-| `chofer` | operar el viaje de **su** camión: entregar, vender, tomar pedidos, cobrar y cerrar ruta |
+| `chofer` | sacar y operar **su** camión: salida, entregar, vender, tomar pedidos, cobrar y cerrar ruta |
 
 Los permisos viven en `internal/domain/auth.go`; cada ruta declara el suyo en `httpapi/router.go`. El primer dueño se crea con `BOOTSTRAP_OWNER_EMAIL` / `BOOTSTRAP_OWNER_PASSWORD` mientras no haya usuarios. No se puede dejar el sistema sin un dueño activo.
 
@@ -68,11 +68,12 @@ Todo requiere sesión salvo `GET /health` y `POST /auth/login`.
 |---|---|---|
 | GET/PUT | `/exchange-rate` | tasa BCV `{rate}` en diezmilésimas |
 | GET/POST | `/products` · `/products/{id}/lots` | catálogo y recepción de lotes |
+| GET | `/lots` | todos los lotes con existencia (la vista del galpón, en una sola llamada) |
 | GET/POST | `/customers` · GET `/customers/{id}/credit` | clientes y estado de crédito |
 | GET/POST | `/orders` · GET `/orders/{id}[/review]` | pedidos |
 | POST | `/orders/{id}/approve` · `/reject` | aprobación de crédito |
 | GET/POST | `/trucks` · GET `/trucks/{id}/load-plan` · POST `/trucks/{id}/dispatch` | picking FEFO y despacho |
-| POST | `/trucks/{id}/depart` `{extra:[{productId,quantity}]}` | sale el camión: factura sus pedidos y sube carga extra |
+| POST | `/trucks/{id}/depart` `{extra:[{productId,quantity}]}` | sale el camión: factura sus pedidos y sube carga extra (el chofer, solo el suyo) |
 | GET | `/trips[?truckId=&status=]` · `/trips/{id}` | viajes; el detalle trae stock a bordo, resumen y diferencias |
 | POST | `/trips/{id}/deliveries` · `/sales` · `/presales` · `/payments` | entregar, vender del camión, tomar pedido, cobrar en la calle |
 | POST | `/trips/{id}/close` · `/settlement/approve` | el chofer cierra la ruta; la oficina aprueba el cuadre |

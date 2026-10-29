@@ -22,14 +22,14 @@ func parseDate(s string) (time.Time, error) {
 }
 
 type productDTO struct {
-	ID        int64         `json:"id"`
-	Name      string        `json:"name"`
-	Unit      domain.Unit   `json:"unit"`
-	PriceUSD  domain.Cents  `json:"priceUsd"`
-	Committed int           `json:"committed"`
-	MinStock  int           `json:"minStock"`
-	Physical  int           `json:"physical"`
-	Available int           `json:"available"`
+	ID        int64        `json:"id"`
+	Name      string       `json:"name"`
+	Unit      domain.Unit  `json:"unit"`
+	PriceUSD  domain.Cents `json:"priceUsd"`
+	Committed int          `json:"committed"`
+	MinStock  int          `json:"minStock"`
+	Physical  int          `json:"physical"`
+	Available int          `json:"available"`
 }
 
 func toProduct(p domain.Product) productDTO {
@@ -129,10 +129,11 @@ type paymentDTO struct {
 	Reference      string       `json:"reference"`
 	AppliedUSD     domain.Cents `json:"appliedUsd"`
 	ExchangeDiffBs domain.Cents `json:"exchangeDiffBs"`
+	TripID         int64        `json:"tripId,omitempty"` // set for payments collected on the street
 }
 
 func toPayment(p domain.Payment) paymentDTO {
-	return paymentDTO{p.ID, p.InvoiceID, fmtDate(p.Date), p.CashUSD, p.Bs, p.Rate, p.Reference, p.AppliedUSD, p.ExchangeDiffBs}
+	return paymentDTO{p.ID, p.InvoiceID, fmtDate(p.Date), p.CashUSD, p.Bs, p.Rate, p.Reference, p.AppliedUSD, p.ExchangeDiffBs, p.TripID}
 }
 
 type invoiceDTO struct {

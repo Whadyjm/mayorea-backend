@@ -18,13 +18,18 @@ const (
 // The failed-login counter lives in process memory, which is enough for a
 // single instance; behind a load balancer it should move to shared storage.
 type AuthService struct {
-	users    UserRepository
-	sessions SessionRepository
-	trucks   TruckRepository
-	hasher   PasswordHasher
-	tokens   Tokens
-	clock    Clock
-	ttl      time.Duration
+	users     UserRepository
+	sessions  SessionRepository
+	trucks    TruckRepository
+	customers CustomerRepository
+	hasher    PasswordHasher
+	tokens    Tokens
+	clock     Clock
+	ttl       time.Duration
+
+	// allowed, when not nil, is the only set of emails that may exist as
+	// accounts, sign in, or keep a session. See RestrictTo.
+	allowed map[string]struct{}
 
 	// dummyHash is verified when the email is unknown, so response time does
 	// not reveal which emails exist.
@@ -39,12 +44,12 @@ type loginAttempt struct {
 	lockedUntil time.Time
 }
 
-func NewAuthService(u UserRepository, s SessionRepository, t TruckRepository, h PasswordHasher, tk Tokens, clock Clock, ttl time.Duration) (*AuthService, error) {
+func NewAuthService(u UserRepository, s SessionRepository, t TruckRepository, c CustomerRepository, h PasswordHasher, tk Tokens, clock Clock, ttl time.Duration) (*AuthService, error) {
 	dummy, err := h.Hash("mayorea-dummy-password")
 	if err != nil {
 		return nil, err
 	}
-	return &AuthService{users: u, sessions: s, trucks: t, hasher: h, tokens: tk, clock: clock, ttl: ttl,
+	return &AuthService{users: u, sessions: s, trucks: t, customers: c, hasher: h, tokens: tk, clock: clock, ttl: ttl,
 		dummyHash: dummy, attempts: map[string]loginAttempt{}}, nil
 }
 
@@ -65,6 +70,10 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (LoginR
 	u, found, err := s.users.FindByEmail(ctx, email)
 	if err != nil {
 		return LoginResult{}, err
+	}
+	// Someone outside the allowlist gets exactly the answer of an unknown email.
+	if found && !s.permits(email, u.Role) {
+		found = false
 	}
 	hash := s.dummyHash
 	if found {
@@ -132,7 +141,7 @@ func (s *AuthService) Authenticate(ctx context.Context, token string) (domain.Pr
 		return domain.Principal{}, domain.Unauthenticated("Tu sesión venció. Inicia sesión de nuevo.")
 	}
 	u, err := s.users.Get(ctx, sess.UserID)
-	if err != nil || !u.Active {
+	if err != nil || !u.Active || !s.permits(u.Email, u.Role) {
 		return domain.Principal{}, domain.Unauthenticated("Tu sesión venció. Inicia sesión de nuevo.")
 	}
 	return u.Principal(), nil
@@ -186,18 +195,22 @@ func (s *AuthService) setPassword(ctx context.Context, u *domain.User, next stri
 // ---------- user management ----------
 
 type NewUser struct {
-	Name     string
-	Email    string
-	Password string
-	Role     domain.Role
-	TruckID  int64
+	Name       string
+	Email      string
+	Password   string
+	Role       domain.Role
+	TruckID    int64
+	CustomerID int64
 }
 
 func (s *AuthService) CreateUser(ctx context.Context, in NewUser) (domain.User, error) {
 	if !domain.ValidEmail(in.Email) {
 		return domain.User{}, domain.Invalid("Ese correo no parece válido.")
 	}
-	if err := domain.ValidateUserFields(in.Name, in.Role, in.TruckID); err != nil {
+	if !s.permits(in.Email, in.Role) {
+		return domain.User{}, domain.Rule("Solo los correos de la lista de acceso pueden ser dueños.")
+	}
+	if err := domain.ValidateUserFields(in.Name, in.Role, in.TruckID, in.CustomerID); err != nil {
 		return domain.User{}, err
 	}
 	if err := domain.ValidatePassword(in.Password); err != nil {
@@ -208,13 +221,16 @@ func (s *AuthService) CreateUser(ctx context.Context, in NewUser) (domain.User, 
 			return domain.User{}, err
 		}
 	}
+	if err := s.checkCustomer(ctx, in.CustomerID, 0); err != nil {
+		return domain.User{}, err
+	}
 	hash, err := s.hasher.Hash(in.Password)
 	if err != nil {
 		return domain.User{}, err
 	}
 	u := domain.User{
 		Name: strings.TrimSpace(in.Name), Email: domain.NormalizeEmail(in.Email), PasswordHash: hash,
-		Role: in.Role, Active: true, TruckID: in.TruckID,
+		Role: in.Role, Active: true, TruckID: in.TruckID, CustomerID: in.CustomerID,
 	}
 	if err := s.users.Create(ctx, &u); err != nil {
 		return domain.User{}, err
@@ -222,25 +238,50 @@ func (s *AuthService) CreateUser(ctx context.Context, in NewUser) (domain.User, 
 	return u, nil
 }
 
+// checkCustomer verifies the customer exists and has no other login (self is the
+// user being edited, 0 when creating). customerID 0 means "not a commerce account".
+func (s *AuthService) checkCustomer(ctx context.Context, customerID, self int64) error {
+	if customerID == 0 {
+		return nil
+	}
+	if _, err := s.customers.Get(ctx, customerID); err != nil {
+		return err
+	}
+	all, err := s.users.List(ctx)
+	if err != nil {
+		return err
+	}
+	for _, o := range all {
+		if o.CustomerID == customerID && o.ID != self {
+			return domain.Conflict("Ese comercio ya tiene credenciales.")
+		}
+	}
+	return nil
+}
+
 func (s *AuthService) ListUsers(ctx context.Context) ([]domain.User, error) {
 	return s.users.List(ctx)
 }
 
 type EditUser struct {
-	Name    string
-	Role    domain.Role
-	Active  bool
-	TruckID int64
+	Name       string
+	Role       domain.Role
+	Active     bool
+	TruckID    int64
+	CustomerID int64
 }
 
 // UpdateUser edits a user. The business can never be left without an active owner.
 func (s *AuthService) UpdateUser(ctx context.Context, id int64, in EditUser) (domain.User, error) {
-	if err := domain.ValidateUserFields(in.Name, in.Role, in.TruckID); err != nil {
+	if err := domain.ValidateUserFields(in.Name, in.Role, in.TruckID, in.CustomerID); err != nil {
 		return domain.User{}, err
 	}
 	u, err := s.users.Get(ctx, id)
 	if err != nil {
 		return domain.User{}, err
+	}
+	if !s.permits(u.Email, in.Role) {
+		return domain.User{}, domain.Rule("Solo los correos de la lista de acceso pueden ser dueños.")
 	}
 	if u.Role == domain.RoleOwner && u.Active && (in.Role != domain.RoleOwner || !in.Active) {
 		all, err := s.users.List(ctx)
@@ -262,7 +303,10 @@ func (s *AuthService) UpdateUser(ctx context.Context, id int64, in EditUser) (do
 			return domain.User{}, err
 		}
 	}
-	u.Name, u.Role, u.Active, u.TruckID = strings.TrimSpace(in.Name), in.Role, in.Active, in.TruckID
+	if err := s.checkCustomer(ctx, in.CustomerID, id); err != nil {
+		return domain.User{}, err
+	}
+	u.Name, u.Role, u.Active, u.TruckID, u.CustomerID = strings.TrimSpace(in.Name), in.Role, in.Active, in.TruckID, in.CustomerID
 	if err := s.users.Update(ctx, &u); err != nil {
 		return domain.User{}, err
 	}
@@ -274,13 +318,57 @@ func (s *AuthService) UpdateUser(ctx context.Context, id int64, in EditUser) (do
 	return u, nil
 }
 
-// Bootstrap creates the first owner when the system has no users yet. It is a
-// no-op afterwards, so it is safe to call on every start.
-func (s *AuthService) Bootstrap(ctx context.Context, name, email, password string) (created bool, err error) {
-	n, err := s.users.Count(ctx)
-	if err != nil || n > 0 {
-		return false, err
+// ---------- access allowlist ----------
+
+// RestrictTo limits who can be an owner (the only role that manages users) to
+// the given emails: nobody else can be created, promoted, sign in or keep a
+// session as owner (sessions are re-checked on every request, so removing an
+// email takes effect at once). Accounts of other roles, created by the owners,
+// are unaffected. An empty list lifts the restriction.
+func (s *AuthService) RestrictTo(emails []string) {
+	if len(emails) == 0 {
+		s.allowed = nil
+		return
 	}
-	_, err = s.CreateUser(ctx, NewUser{Name: name, Email: email, Password: password, Role: domain.RoleOwner})
-	return err == nil, err
+	s.allowed = make(map[string]struct{}, len(emails))
+	for _, e := range emails {
+		s.allowed[domain.NormalizeEmail(e)] = struct{}{}
+	}
+}
+
+func (s *AuthService) permits(email string, role domain.Role) bool {
+	if s.allowed == nil || role != domain.RoleOwner {
+		return true
+	}
+	_, ok := s.allowed[domain.NormalizeEmail(email)]
+	return ok
+}
+
+// SeedOwner is an owner account that must exist.
+type SeedOwner struct {
+	Name     string
+	Email    string
+	Password string
+}
+
+// EnsureOwners creates the owners that do not exist yet and leaves existing
+// accounts untouched (never resets a password), so it is safe on every start.
+// It returns the emails it created.
+func (s *AuthService) EnsureOwners(ctx context.Context, owners []SeedOwner) ([]string, error) {
+	var created []string
+	for _, o := range owners {
+		email := domain.NormalizeEmail(o.Email)
+		_, found, err := s.users.FindByEmail(ctx, email)
+		if err != nil {
+			return created, err
+		}
+		if found {
+			continue
+		}
+		if _, err := s.CreateUser(ctx, NewUser{Name: o.Name, Email: email, Password: o.Password, Role: domain.RoleOwner}); err != nil {
+			return created, err
+		}
+		created = append(created, email)
+	}
+	return created, nil
 }

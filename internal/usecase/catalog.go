@@ -86,6 +86,20 @@ func (s *CatalogService) ReceiveLot(ctx context.Context, in NewLot) (domain.Lot,
 	return l, nil
 }
 
+// ListStockedLots returns every lot that still has stock, across all products
+// (the warehouse view; avoids asking product by product).
+func (s *CatalogService) ListStockedLots(ctx context.Context) ([]domain.Lot, error) {
+	ps, err := s.products.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]int64, len(ps))
+	for i, p := range ps {
+		ids[i] = p.ID
+	}
+	return s.lots.ListAvailable(ctx, ids)
+}
+
 func (s *CatalogService) ListLots(ctx context.Context, productID int64) ([]domain.Lot, error) {
 	return s.lots.ListByProduct(ctx, productID)
 }
@@ -152,7 +166,7 @@ func (s *CatalogService) SetRate(ctx context.Context, rate domain.Rate) (domain.
 	if rate <= 0 {
 		return domain.ExchangeRate{}, domain.Invalid("La tasa debe ser mayor a cero.")
 	}
-	r := domain.ExchangeRate{Rate: rate, UpdatedOn: s.clock.Today()}
+	r := domain.ExchangeRate{Rate: rate, UpdatedOn: s.clock.Today(), UpdatedAt: s.clock.Now()}
 	if err := s.rates.Set(ctx, r); err != nil {
 		return domain.ExchangeRate{}, err
 	}

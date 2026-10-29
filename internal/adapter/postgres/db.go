@@ -111,7 +111,7 @@ func (d *DB) Orders() usecase.OrderRepository       { return orderRepo{d} }
 func (d *DB) Invoices() usecase.InvoiceRepository   { return invoiceRepo{d} }
 func (d *DB) Trucks() usecase.TruckRepository       { return truckRepo{d} }
 func (d *DB) Trips() usecase.TripRepository         { return tripRepo{d} }
-func (d *DB) Rates()usecase.RateRepository         { return rateRepo{d} }
+func (d *DB) Rates() usecase.RateRepository         { return rateRepo{d} }
 
 // notFoundIf maps pgx.ErrNoRows to a domain NotFound error.
 func notFoundIf(err error, what string) error {

@@ -16,10 +16,34 @@ type Config struct {
 	Timezone       string   // business day zone
 	SessionTTL     time.Duration
 
-	// First owner, created only when the system has no users yet.
-	BootstrapName     string
-	BootstrapEmail    string
-	BootstrapPassword string
+	// AccessAllowlist, when not empty, is the only set of emails that may have
+	// an account or sign in. Empty means no restriction.
+	AccessAllowlist []string
+
+	// Owners that must exist; created at startup if missing (see ParseOwners).
+	BootstrapOwners []OwnerSeed
+}
+
+// OwnerSeed is an owner account to create on startup if it does not exist.
+type OwnerSeed struct {
+	Name, Email, Password string
+}
+
+// ParseOwners reads "Name|email|password;Name|email|password". Errors never
+// include the entry itself, so a password cannot leak into logs.
+func ParseOwners(s string) ([]OwnerSeed, error) {
+	var out []OwnerSeed
+	for i, entry := range strings.Split(s, ";") {
+		if strings.TrimSpace(entry) == "" {
+			continue
+		}
+		parts := strings.Split(entry, "|")
+		if len(parts) != 3 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" || parts[2] == "" {
+			return nil, fmt.Errorf("BOOTSTRAP_OWNERS entry %d is malformed (want name|email|password)", i+1)
+		}
+		out = append(out, OwnerSeed{Name: strings.TrimSpace(parts[0]), Email: strings.TrimSpace(parts[1]), Password: parts[2]})
+	}
+	return out, nil
 }
 
 func Load() (Config, error) {
@@ -30,10 +54,13 @@ func Load() (Config, error) {
 		AllowedOrigins: split(get("CORS_ORIGINS", "http://localhost:5173")),
 		Timezone:       get("TIMEZONE", "America/Caracas"),
 
-		BootstrapName:     get("BOOTSTRAP_OWNER_NAME", "Dueño"),
-		BootstrapEmail:    os.Getenv("BOOTSTRAP_OWNER_EMAIL"),
-		BootstrapPassword: os.Getenv("BOOTSTRAP_OWNER_PASSWORD"),
+		AccessAllowlist: split(os.Getenv("ACCESS_ALLOWLIST")),
 	}
+	owners, err := ParseOwners(os.Getenv("BOOTSTRAP_OWNERS"))
+	if err != nil {
+		return c, err
+	}
+	c.BootstrapOwners = owners
 	ttl, err := time.ParseDuration(get("SESSION_TTL", "24h"))
 	if err != nil || ttl <= 0 {
 		return c, fmt.Errorf("SESSION_TTL must be a positive duration like 24h")

@@ -47,6 +47,9 @@ func main() {
 }
 
 func run() error {
+	if err := config.LoadDotEnv(".env"); err != nil {
+		return fmt.Errorf("read .env: %w", err)
+	}
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -77,20 +80,26 @@ func run() error {
 	}
 
 	clk := clock.NewSystem(cfg.Timezone)
-	authSvc, err := usecase.NewAuthService(st.users, st.sessions, st.trucks, platformauth.NewBcrypt(0), platformauth.Tokens{}, clk, cfg.SessionTTL)
+	authSvc, err := usecase.NewAuthService(st.users, st.sessions, st.trucks, st.customers, platformauth.NewBcrypt(0), platformauth.Tokens{}, clk, cfg.SessionTTL)
 	if err != nil {
 		return err
 	}
-	if cfg.BootstrapEmail != "" {
-		created, err := authSvc.Bootstrap(ctx, cfg.BootstrapName, cfg.BootstrapEmail, cfg.BootstrapPassword)
-		if err != nil {
-			return fmt.Errorf("bootstrap owner: %w", err)
-		}
-		if created {
-			slog.Info("first owner created", "email", cfg.BootstrapEmail)
-		}
+	authSvc.RestrictTo(cfg.AccessAllowlist)
+	if len(cfg.AccessAllowlist) > 0 {
+		slog.Info("access restricted to allowlist", "emails", len(cfg.AccessAllowlist))
 	} else {
-		slog.Warn("BOOTSTRAP_OWNER_EMAIL not set: if there are no users yet nobody will be able to sign in")
+		slog.Warn("ACCESS_ALLOWLIST is empty: any account that exists can sign in")
+	}
+	seeds := make([]usecase.SeedOwner, len(cfg.BootstrapOwners))
+	for i, o := range cfg.BootstrapOwners {
+		seeds[i] = usecase.SeedOwner{Name: o.Name, Email: o.Email, Password: o.Password}
+	}
+	created, err := authSvc.EnsureOwners(ctx, seeds)
+	if err != nil {
+		return fmt.Errorf("seed owners: %w", err)
+	}
+	for _, email := range created {
+		slog.Info("owner created", "email", email)
 	}
 
 	orders := usecase.NewOrderService(st, st.orders, st.customers, st.products, st.invoices, clk)

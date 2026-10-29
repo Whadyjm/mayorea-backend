@@ -29,7 +29,7 @@ func newApp(t *testing.T) *app {
 	t.Helper()
 	st := memory.NewStore()
 	clk := &clock.Fixed{Day: time.Date(2026, 10, 28, 8, 0, 0, 0, time.UTC)}
-	authSvc, err := usecase.NewAuthService(st.Users(), st.Sessions(), st.Trucks(), platformauth.NewBcrypt(4), platformauth.Tokens{}, clk, time.Hour)
+	authSvc, err := usecase.NewAuthService(st.Users(), st.Sessions(), st.Trucks(), st.Customers(), platformauth.NewBcrypt(4), platformauth.Tokens{}, clk, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,6 +166,11 @@ func TestDriverIsScopedToTheirOwnTruck(t *testing.T) {
 	own := "/api/v1/trips/" + itoa(trip1.ID)
 	other := "/api/v1/trips/" + itoa(trip2.ID)
 
+	// A driver may send out their own truck, never someone else's, and not just anyone can.
+	a.expect(http.StatusForbidden, "POST", "/api/v1/trucks/"+itoa(t2.ID)+"/depart", driver1, map[string]any{})
+	a.expect(http.StatusUnprocessableEntity, "POST", "/api/v1/trucks/"+itoa(t1.ID)+"/depart", driver1, map[string]any{}) // allowed; the truck is already out... nothing new to load
+	a.expect(http.StatusForbidden, "POST", "/api/v1/trucks/"+itoa(t1.ID)+"/depart", a.user(domain.RoleCredit, "cred@g.com", 0), map[string]any{})
+
 	a.expect(http.StatusOK, "GET", own, driver1, nil)
 	a.expect(http.StatusForbidden, "GET", other, driver1, nil)
 	a.expect(http.StatusForbidden, "POST", other+"/close", driver1, map[string]any{"cashUsd": 0})
@@ -216,4 +221,79 @@ func mustTruck(t *testing.T, a *app, name string) domain.Truck {
 func itoa(n int64) string {
 	b, _ := json.Marshal(n)
 	return string(b)
+}
+
+func TestCommerceSeesOnlyItsOwnAccount(t *testing.T) {
+	a := newApp(t)
+	ctx := context.Background()
+	if _, err := a.catalog.SetRate(ctx, 365_214); err != nil {
+		t.Fatal(err)
+	}
+	p, _ := a.catalog.CreateProduct(ctx, usecase.NewProduct{Name: "Harina", Unit: domain.UnitBulk, PriceUSD: 1000})
+	if _, err := a.catalog.ReceiveLot(ctx, usecase.NewLot{ProductID: p.ID, Code: "L", ExpiresOn: time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC), Quantity: 100}); err != nil {
+		t.Fatal(err)
+	}
+	mine, _ := a.catalog.CreateCustomer(ctx, usecase.NewCustomer{Name: "Abasto Sol", RIF: "J-12345678-9", Route: "Norte", CreditLimitUSD: 100_000, CreditDays: 7})
+	other, _ := a.catalog.CreateCustomer(ctx, usecase.NewCustomer{Name: "Bodega Luna", RIF: "J-98765432-1", Route: "Sur", CreditLimitUSD: 100_000, CreditDays: 7})
+
+	shop := a.shop("sol@g.com", mine.ID)
+	owner := a.user(domain.RoleOwner, "dueno@g.com", 0)
+
+	// Browsing: products and the rate are open; stock, trucks, trips and users are not.
+	a.expect(http.StatusOK, "GET", "/api/v1/products", shop, nil)
+	a.expect(http.StatusOK, "GET", "/api/v1/exchange-rate", shop, nil)
+	for _, path := range []string{"/api/v1/lots", "/api/v1/trucks", "/api/v1/trips", "/api/v1/users"} {
+		a.expect(http.StatusForbidden, "GET", path, shop, nil)
+	}
+
+	// The customer list holds only itself.
+	var cs []struct{ ID int64 }
+	if err := json.Unmarshal(a.do("GET", "/api/v1/customers", shop, nil).Body.Bytes(), &cs); err != nil || len(cs) != 1 || cs[0].ID != mine.ID {
+		t.Fatalf("customers = %+v (%v)", cs, err)
+	}
+	a.expect(http.StatusOK, "GET", "/api/v1/customers/"+itoa(mine.ID)+"/credit", shop, nil)
+	a.expect(http.StatusNotFound, "GET", "/api/v1/customers/"+itoa(other.ID)+"/credit", shop, nil)
+
+	// An order is always for the caller, whatever customerId the body claims.
+	body := map[string]any{"customerId": other.ID, "terms": "contado", "channel": "oficina", "lines": []map[string]any{{"productId": p.ID, "quantity": 2}}}
+	rec := a.do("POST", "/api/v1/orders", shop, body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create order: %d %s", rec.Code, rec.Body)
+	}
+	var created struct {
+		ID         int64
+		CustomerID int64
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+	if created.CustomerID != mine.ID {
+		t.Fatalf("order went to customer %d, want %d", created.CustomerID, mine.ID)
+	}
+
+	// Someone else's order is invisible; the owner's is not.
+	body["customerId"] = other.ID
+	ownerOrder := a.do("POST", "/api/v1/orders", owner, body)
+	var theirs struct{ ID int64 }
+	_ = json.Unmarshal(ownerOrder.Body.Bytes(), &theirs)
+	a.expect(http.StatusOK, "GET", "/api/v1/orders/"+itoa(created.ID), shop, nil)
+	a.expect(http.StatusNotFound, "GET", "/api/v1/orders/"+itoa(theirs.ID), shop, nil)
+	var orders []struct{ CustomerID int64 }
+	_ = json.Unmarshal(a.do("GET", "/api/v1/orders?customerId="+itoa(other.ID), shop, nil).Body.Bytes(), &orders)
+	if len(orders) != 1 || orders[0].CustomerID != mine.ID {
+		t.Fatalf("orders = %+v", orders)
+	}
+
+	// It cannot approve, review, collect or look at the office's books.
+	a.expect(http.StatusForbidden, "POST", "/api/v1/orders/"+itoa(created.ID)+"/approve", shop, nil)
+	a.expect(http.StatusForbidden, "POST", "/api/v1/invoices/1/payments", shop, map[string]any{"cashUsd": 100})
+	a.expect(http.StatusForbidden, "POST", "/api/v1/customers", shop, map[string]any{"name": "X"})
+	a.expect(http.StatusOK, "GET", "/api/v1/invoices", shop, nil)
+}
+
+func (a *app) shop(email string, customerID int64) string {
+	a.t.Helper()
+	_, err := a.auth.CreateUser(context.Background(), usecase.NewUser{Name: email, Email: email, Password: "clave-segura-1", Role: domain.RoleShop, CustomerID: customerID})
+	if err != nil {
+		a.t.Fatal(err)
+	}
+	return a.login(email, "clave-segura-1")
 }

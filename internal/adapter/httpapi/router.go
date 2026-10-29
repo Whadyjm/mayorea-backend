@@ -58,13 +58,14 @@ func NewRouter(svc Services, opt Options) http.Handler {
 	route("POST /users/{id}/password", domain.PermUsersManage, h.resetPassword)
 
 	// Catalog.
-	route("GET /exchange-rate", domain.PermCatalogRead, h.getRate)
+	route("GET /exchange-rate", domain.PermCatalogBrowse, h.getRate)
 	route("PUT /exchange-rate", domain.PermRateWrite, h.setRate)
-	route("GET /products", domain.PermCatalogRead, h.listProducts)
+	route("GET /products", domain.PermCatalogBrowse, h.listProducts)
 	route("POST /products", domain.PermCatalogWrite, h.createProduct)
+	route("GET /lots", domain.PermCatalogRead, h.listStockedLots)
 	route("GET /products/{id}/lots", domain.PermCatalogRead, h.listLots)
 	route("POST /products/{id}/lots", domain.PermCatalogWrite, h.receiveLot)
-	route("GET /customers", domain.PermCatalogRead, h.listCustomers)
+	route("GET /customers", domain.PermCatalogBrowse, h.listCustomers)
 	route("POST /customers", domain.PermCustomersWrite, h.createCustomer)
 	route("GET /customers/{id}/credit", domain.PermOrdersRead, h.customerCredit)
 	route("GET /trucks", domain.PermCatalogRead, h.listTrucks)
@@ -85,7 +86,7 @@ func NewRouter(svc Services, opt Options) http.Handler {
 	// Dispatch.
 	route("GET /trucks/{id}/load-plan", domain.PermDispatchManage, h.loadPlan)
 	route("POST /trucks/{id}/dispatch", domain.PermDispatchManage, h.dispatch)
-	route("POST /trucks/{id}/depart", domain.PermDispatchManage, h.depart)
+	route("POST /trucks/{id}/depart", domain.PermTripsDepart, h.ownTruck(h.depart))
 
 	// Trips: drivers act only on their own truck's trip.
 	route("GET /trips", domain.PermTripsRead, h.listTrips)

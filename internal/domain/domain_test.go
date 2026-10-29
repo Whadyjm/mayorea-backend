@@ -57,7 +57,7 @@ func TestLotPoolIsFEFOAndAtomicOnShortage(t *testing.T) {
 	if _, err := pool.Take(1, 3); KindOf(err) != KindRule { // only 2 left
 		t.Fatalf("shortage should be a rule error, got %v", err)
 	}
-	if ch := pool.Changed(); len(ch) != 2 || ch[1].Quantity != 0 ||ch[0].Quantity != 2 { // lot 1 keeps 2 of 5
+	if ch := pool.Changed(); len(ch) != 2 || ch[1].Quantity != 0 || ch[0].Quantity != 2 { // lot 1 keeps 2 of 5
 		t.Fatalf("a failed Take must not consume stock: %+v", ch)
 	}
 }

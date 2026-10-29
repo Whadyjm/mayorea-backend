@@ -17,6 +17,13 @@ func principalFrom(ctx context.Context) (domain.Principal, bool) {
 	return p, ok
 }
 
+// shopScope reports the customer a commerce account is limited to. Handlers use
+// it to narrow lists and to hide records of other customers (as "not found").
+func shopScope(r *http.Request) (customerID int64, scoped bool) {
+	p, _ := principalFrom(r.Context())
+	return p.CustomerID, p.Role == domain.RoleShop
+}
+
 func bearerToken(r *http.Request) string {
 	h := r.Header.Get("Authorization")
 	if len(h) > 7 && strings.EqualFold(h[:7], "bearer ") {
@@ -40,6 +47,25 @@ func (h handlers) require(perm domain.Permission, next http.HandlerFunc) http.Ha
 			return
 		}
 		next(w, r.WithContext(context.WithValue(r.Context(), principalKey{}, p)))
+	}
+}
+
+// ownTruck restricts drivers to the truck assigned to them (the {id} in the path).
+func (h handlers) ownTruck(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		p, _ := principalFrom(r.Context())
+		if p.Role == domain.RoleDriver {
+			id, err := pathID(r, "id")
+			if err != nil {
+				writeError(w, r, err)
+				return
+			}
+			if p.TruckID == 0 || id != p.TruckID {
+				writeError(w, r, domain.Forbidden("Ese no es tu camión."))
+				return
+			}
+		}
+		next(w, r)
 	}
 }
 
@@ -71,19 +97,23 @@ func (h handlers) ownTrip(next http.HandlerFunc) http.HandlerFunc {
 // ---------- DTOs ----------
 
 type userDTO struct {
-	ID      int64         `json:"id"`
-	Name    string        `json:"name"`
-	Email   string        `json:"email"`
-	Role    domain.Role   `json:"role"`
-	Active  bool          `json:"active"`
-	TruckID *int64        `json:"truckId"`
-	Perms   []domain.Permission `json:"permissions,omitempty"`
+	ID         int64               `json:"id"`
+	Name       string              `json:"name"`
+	Email      string              `json:"email"`
+	Role       domain.Role         `json:"role"`
+	Active     bool                `json:"active"`
+	TruckID    *int64              `json:"truckId"`
+	CustomerID *int64              `json:"customerId"`
+	Perms      []domain.Permission `json:"permissions,omitempty"`
 }
 
 func toUser(u domain.User) userDTO {
 	d := userDTO{ID: u.ID, Name: u.Name, Email: u.Email, Role: u.Role, Active: u.Active}
 	if u.TruckID != 0 {
 		d.TruckID = &u.TruckID
+	}
+	if u.CustomerID != 0 {
+		d.CustomerID = &u.CustomerID
 	}
 	return d
 }
@@ -161,17 +191,18 @@ func (h handlers) listUsers(w http.ResponseWriter, r *http.Request) {
 
 func (h handlers) createUser(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Name     string      `json:"name"`
-		Email    string      `json:"email"`
-		Password string      `json:"password"`
-		Role     domain.Role `json:"role"`
-		TruckID  int64       `json:"truckId"`
+		Name       string      `json:"name"`
+		Email      string      `json:"email"`
+		Password   string      `json:"password"`
+		Role       domain.Role `json:"role"`
+		TruckID    int64       `json:"truckId"`
+		CustomerID int64       `json:"customerId"`
 	}
 	if err := decode(r, &in); err != nil {
 		writeError(w, r, err)
 		return
 	}
-	u, err := h.Auth.CreateUser(r.Context(), usecase.NewUser{Name: in.Name, Email: in.Email, Password: in.Password, Role: in.Role, TruckID: in.TruckID})
+	u, err := h.Auth.CreateUser(r.Context(), usecase.NewUser{Name: in.Name, Email: in.Email, Password: in.Password, Role: in.Role, TruckID: in.TruckID, CustomerID: in.CustomerID})
 	if err != nil {
 		writeError(w, r, err)
 		return
@@ -186,16 +217,17 @@ func (h handlers) updateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Name    string      `json:"name"`
-		Role    domain.Role `json:"role"`
-		Active  bool        `json:"active"`
-		TruckID int64       `json:"truckId"`
+		Name       string      `json:"name"`
+		Role       domain.Role `json:"role"`
+		Active     bool        `json:"active"`
+		TruckID    int64       `json:"truckId"`
+		CustomerID int64       `json:"customerId"`
 	}
 	if err := decode(r, &in); err != nil {
 		writeError(w, r, err)
 		return
 	}
-	u, err := h.Auth.UpdateUser(r.Context(), id, usecase.EditUser{Name: in.Name, Role: in.Role, Active: in.Active, TruckID: in.TruckID})
+	u, err := h.Auth.UpdateUser(r.Context(), id, usecase.EditUser{Name: in.Name, Role: in.Role, Active: in.Active, TruckID: in.TruckID, CustomerID: in.CustomerID})
 	if err != nil {
 		writeError(w, r, err)
 		return

@@ -62,5 +62,6 @@ func (t Truck) Serves(route string) bool {
 
 type ExchangeRate struct {
 	Rate      Rate
-	UpdatedOn time.Time
+	UpdatedOn time.Time // business day it applies to
+	UpdatedAt time.Time // exact instant it was set
 }

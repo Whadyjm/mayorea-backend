@@ -38,9 +38,11 @@ func NotFound(format string, a ...any) error { return newError(KindNotFound, for
 func Conflict(format string, a ...any) error { return newError(KindConflict, format, a...) }
 func Rule(format string, a ...any) error     { return newError(KindRule, format, a...) }
 
-func Unauthenticated(format string, a ...any) error { return newError(KindUnauthenticated, format, a...) }
-func Forbidden(format string, a ...any) error       { return newError(KindForbidden, format, a...) }
-func Throttled(format string, a ...any) error       { return newError(KindThrottled, format, a...) }
+func Unauthenticated(format string, a ...any) error {
+	return newError(KindUnauthenticated, format, a...)
+}
+func Forbidden(format string, a ...any) error { return newError(KindForbidden, format, a...) }
+func Throttled(format string, a ...any) error { return newError(KindThrottled, format, a...) }
 
 // KindOf returns the Kind of err, or 0 when err is not a domain error.
 func KindOf(err error) Kind {

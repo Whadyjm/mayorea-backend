@@ -15,11 +15,13 @@ const (
 	RoleWarehouse   Role = "galpon"      // stock, picking and dispatch
 	RoleSalesperson Role = "preventista" // takes orders
 	RoleDriver      Role = "chofer"      // runs a truck on the street
+	RoleShop        Role = "comercio"    // a customer business signing in to its own account
 )
 
 type Permission string
 
 const (
+	PermCatalogBrowse    Permission = "catalog.browse" // products, prices and the BCV rate; also held by commerce accounts
 	PermCatalogRead      Permission = "catalog.read"
 	PermCatalogWrite     Permission = "catalog.write" // products, lots, trucks
 	PermCustomersWrite   Permission = "customers.write"
@@ -30,6 +32,7 @@ const (
 	PermDispatchManage   Permission = "dispatch.manage" // load plan, dispatch, depart
 	PermCollectionsRead  Permission = "collections.read"
 	PermCollectionsWrite Permission = "collections.register"
+	PermTripsDepart      Permission = "trips.depart" // send a truck out; drivers only their own
 	PermTripsRead        Permission = "trips.read"
 	PermTripsOperate     Permission = "trips.operate" // the driver's actions on a trip
 	PermTripsSettle      Permission = "trips.settle"  // office approves the driver's count
@@ -37,26 +40,31 @@ const (
 )
 
 var allPermissions = []Permission{
-	PermCatalogRead, PermCatalogWrite, PermCustomersWrite, PermRateWrite,
+	PermCatalogBrowse, PermCatalogRead, PermCatalogWrite, PermCustomersWrite, PermRateWrite,
 	PermOrdersRead, PermOrdersCreate, PermOrdersApprove, PermDispatchManage,
-	PermCollectionsRead, PermCollectionsWrite, PermTripsRead, PermTripsOperate,
+	PermCollectionsRead, PermCollectionsWrite, PermTripsDepart, PermTripsRead, PermTripsOperate,
 	PermTripsSettle, PermUsersManage,
 }
 
 var rolePermissions = map[Role][]Permission{
 	RoleOwner: allPermissions,
 	RoleCredit: {
-		PermCatalogRead, PermCustomersWrite, PermRateWrite, PermOrdersRead, PermOrdersApprove,
+		PermCatalogBrowse, PermCatalogRead, PermCustomersWrite, PermRateWrite, PermOrdersRead, PermOrdersApprove,
 		PermCollectionsRead, PermCollectionsWrite, PermTripsRead, PermTripsSettle,
 	},
 	RoleWarehouse: {
-		PermCatalogRead, PermCatalogWrite, PermOrdersRead, PermDispatchManage, PermTripsRead,
+		PermCatalogBrowse, PermCatalogRead, PermCatalogWrite, PermOrdersRead, PermDispatchManage, PermTripsDepart, PermTripsRead,
 	},
 	RoleSalesperson: {
-		PermCatalogRead, PermOrdersRead, PermOrdersCreate,
+		PermCatalogBrowse, PermCatalogRead, PermOrdersRead, PermOrdersCreate,
 	},
 	RoleDriver: {
-		PermCatalogRead, PermCollectionsRead, PermTripsRead, PermTripsOperate,
+		PermCatalogBrowse, PermCatalogRead, PermCollectionsRead, PermTripsDepart, PermTripsRead, PermTripsOperate,
+	},
+	// A commerce works only on its own account: the handlers scope orders, invoices
+	// and the customer list to Principal.CustomerID.
+	RoleShop: {
+		PermCatalogBrowse, PermOrdersRead, PermOrdersCreate, PermCollectionsRead,
 	},
 }
 
@@ -81,20 +89,22 @@ type User struct {
 	Role         Role
 	Active       bool
 	TruckID      int64 // drivers only: the truck they run; 0 otherwise
+	CustomerID   int64 // commerces only: the customer they sign in for; 0 otherwise
 }
 
 // Principal is the authenticated caller, as seen by authorization checks.
 type Principal struct {
-	UserID  int64
-	Name    string
-	Role    Role
-	TruckID int64
+	UserID     int64
+	Name       string
+	Role       Role
+	TruckID    int64
+	CustomerID int64
 }
 
 func (p Principal) Can(perm Permission) bool { return p.Role.Can(perm) }
 
 func (u User) Principal() Principal {
-	return Principal{UserID: u.ID, Name: u.Name, Role: u.Role, TruckID: u.TruckID}
+	return Principal{UserID: u.ID, Name: u.Name, Role: u.Role, TruckID: u.TruckID, CustomerID: u.CustomerID}
 }
 
 // Session is a login. Only the digest of the token is stored.
@@ -120,7 +130,7 @@ func ValidatePassword(p string) error {
 }
 
 // ValidateUserFields checks the data shared by creation and edition.
-func ValidateUserFields(name string, role Role, truckID int64) error {
+func ValidateUserFields(name string, role Role, truckID, customerID int64) error {
 	switch {
 	case strings.TrimSpace(name) == "":
 		return Invalid("Escribe el nombre de la persona.")
@@ -130,6 +140,10 @@ func ValidateUserFields(name string, role Role, truckID int64) error {
 		return Invalid("Un chofer necesita un camión asignado.")
 	case role != RoleDriver && truckID != 0:
 		return Invalid("Solo los choferes tienen camión asignado.")
+	case role == RoleShop && customerID <= 0:
+		return Invalid("Una cuenta de comercio necesita el comercio al que pertenece.")
+	case role != RoleShop && customerID != 0:
+		return Invalid("Solo las cuentas de comercio se vinculan a un comercio.")
 	}
 	return nil
 }

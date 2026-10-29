@@ -89,4 +89,4 @@ func (s *Store) Orders() usecase.OrderRepository       { return orderRepo{s} }
 func (s *Store) Invoices() usecase.InvoiceRepository   { return invoiceRepo{s} }
 func (s *Store) Trucks() usecase.TruckRepository       { return truckRepo{s} }
 func (s *Store) Trips() usecase.TripRepository         { return tripRepo{s} }
-func (s *Store) Rates()usecase.RateRepository         { return rateRepo{s} }
+func (s *Store) Rates() usecase.RateRepository         { return rateRepo{s} }
